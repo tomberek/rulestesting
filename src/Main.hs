@@ -19,8 +19,10 @@ import Debug.Trace
                        (( Arr f >:> First (Arr x >:> x2)) >:> Arr s ) >:>
                        (( Arr f >:> First (Arr x >:> y2)) >:> Arr s ) = trace "large" $ (:***) x2 y2
 "dots"      forall x y z. x >:> (y >:> z) = trace "dots" $ (x >:> y) >:> z
-"par"   forall f g. Raise >:> (Fst >:> ((Pierce >:> (First (Fst >:> f) >:> Swap)) >:>
-                     ((Pierce >:> (First (Fst >:> g) >:> Swap)) >:> (Raise >:> (Fst >:> Id2))))) = trace "par" (f :*** g)
+"test"  forall f. next Raise (next Fst f) = trace "test" $ f
+"test2" forall f g. next f g  = case (f,g) of
+                                                (Fst,Id2) -> trace "test2" $ Fst
+                                                _ -> trace "hello" $ f >:> g
 ---}
 {-# RULES
 "bump"  forall (f::a -> (a,())).       arr2 f = trace "bump" $ Bump
@@ -29,9 +31,18 @@ import Debug.Trace
 "swap"  forall (f::(a,b)->(b,a)).      arr2 f = trace "swap" $ Swap
 "fst"   forall (f::(a,b)->a).          arr2 f = trace "fst" $ Fst
 "id"    forall (f::forall a. a->a).    arr2 f = trace "id" $ Id2
-"test2" Fst >:> Id2  = trace "test2" $ Fst
-"test"  forall f. next Raise (next Fst f) = trace "test" $ f
+
+"par"   forall (r::Arr (a,b) ((a,b),()))
+               (frst::Arr (a,b) a)
+               (pierce::Arr (a,b) ((a,()),b))
+               (first1::Arr a b -> Arr (a,d) (b,d))
+               (swap::Arr (a,b) (b,a))
+               (i:: Arr a a) f g.
+                r `next` (frst `next`
+                     ((pierce `next` (first1 (frst `next` f) `next` swap)) `next`
+                     ((pierce `next` (first1 (frst `next` g) `next` swap)) `next` (r `next` (frst `next` i))))) = trace "par" $ _
  #-}
+l f g = Pierce `next` (First (Arr fst `next` f) `next` Arr (\(a,b)->(b,a)))
 
 data Arr a b where
     Raise :: Arr (a,b) ((a,b),())
@@ -61,7 +72,6 @@ first2 = Pierce
 bump :: Arr Int (Int,())
 bump = Bump
 
-{-# NOINLINE (>:>) #-}
 (>:>) :: Arr a c -> Arr c b -> Arr a b
 f >:> g = Next f g
 {-# NOINLINE next #-}
