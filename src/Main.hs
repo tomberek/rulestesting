@@ -32,17 +32,19 @@ import Debug.Trace
 "fst"   forall (f::(a,b)->a).          arr2 f = trace "fst" $ Fst
 "id"    forall (f::forall a. a->a).    arr2 f = trace "id" $ Id2
 
-"par"   forall (r::Arr (a,b) ((a,b),()))
-               (frst::Arr (a,b) a)
-               (pierce::Arr (a,b) ((a,()),b))
-               (first1::Arr a b -> Arr (a,d) (b,d))
-               (swap::Arr (a,b) (b,a))
-               (i:: Arr a a) f g.
+"par"   forall (r::      Arr (a,b) ((a,b),()))
+               (frst::   Arr (a,b) a)
+               (pierce:: Arr (a,b) ((a,()),b))
+               (first1:: Arr a b -> Arr (a,d) (b,d))
+               (swap::   Arr (a,b) (b,a))
+               (i::      Arr a a) f g.
                 r `next` (frst `next`
                      ((pierce `next` (first1 (frst `next` f) `next` swap)) `next`
                      ((pierce `next` (first1 (frst `next` g) `next` swap)) `next` (r `next` (frst `next` i))))) = trace "par" $ _
  #-}
-l f g = Pierce `next` (First (Arr fst `next` f) `next` Arr (\(a,b)->(b,a)))
+--l :: Arr a b -> Arr a b -> _ -> _
+l f g h= ((Pierce `next` (First (Arr fst `next` f) `next` Arr (\(a,b)->(b,a) )) `next`
+         ((Pierce `next` (First (Arr fst `next` f) `next` Arr (\(a,b)->(b,a) )) `next` h))))
 
 data Arr a b where
     Raise :: Arr (a,b) ((a,b),())
