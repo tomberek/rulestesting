@@ -1,126 +1,160 @@
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE Arrows #-}
--- | Main entry point to the application.
 module Main where
 
 import Control.Arrow
 import Control.Category
 import Prelude hiding (id,(.))
+import Control.Monad.Fix
 import Debug.Trace
+import Data.List (intercalate)
 
-{-
-
-"arr>>>2"   forall f g h. (Arr f) >:> ( (Arr g) >:> h) = trace "fired2" ( (Arr (g . f)) >:> h)
-"arr>>"     forall f g. (Arr f) >:> (Arr g) = trace "fired1" $ Arr (g . f)
-"larger"    forall x2 y2
-                       (x::forall a b. (a,b)-> a         )
-                       (f::forall a b. (a,b)->((a,()),b) )
-                       (s::forall a b. (a,b)-> (b,a)     ).
-                       (( Arr f >:> First (Arr x >:> x2)) >:> Arr s ) >:>
-                       (( Arr f >:> First (Arr x >:> y2)) >:> Arr s ) = trace "large" $ (:***) x2 y2
-"dots"      forall x y z. x >:> (y >:> z) = trace "dots" $ (x >:> y) >:> z
-"test"  forall f. next Raise (next Fst f) = trace "test" $ f
-"test2" forall f g. next f g  = case (f,g) of
-                                                (Fst,Id2) -> trace "test2" $ Fst
-                                                _ -> trace "hello" $ f >:> g
----}
 {-# RULES
-"bump"  forall (f::a -> (a,())).       arr2 f = trace "bump" $ Bump
-"raise" forall (f::(a,b)->((a,b),())). arr2 f = trace "raise" $ Raise
+"id"    forall (f::forall a. a->a).    arr2 f = trace "id2" $ Id2
 "pierce"forall (f::(a,b)->((a,()),b)). arr2 f = trace "pierce" $ Pierce
+"pierc3"forall (f::(a,b)->((a,()),(a,b))). arr2 f = trace "pierc3" $ Pierce3
+
+"rotate"forall (f::(c,(a,b))->(a,b,c) ). arr2 f = trace "rotate" $ Swap3
 "swap"  forall (f::(a,b)->(b,a)).      arr2 f = trace "swap" $ Swap
+
+"promote" forall (f::(a,b,c)->((a,()),(b,c))). arr2 f = trace "promote" $ Promote31
+"promote" forall (f::(a,b,c)->((b,()),(a,c))). arr2 f = trace "promote" $ Promote32
+"promote" forall (f::(a,b,c)->((c,()),(a,b))). arr2 f = trace "promote" $ Promote33
+
+"pier"  forall (f::(a,b)->((a,()),b)). arr2 f = trace "pierce" $ Pierce
+"split" forall (f::a->(a,a)).          arr2 f = trace "split" $ error "split"
+"walk"  forall (f::(a,b,c)->(b,c,a)).  arr2 f = trace "walk" $ error "walk"
+"walk2"  forall (f::(a,b,c)->(b,a,c)).  arr2 f = trace "walk2" $ error "walk2"
 "fst"   forall (f::(a,b)->a).          arr2 f = trace "fst" $ Fst
-"id"    forall (f::forall a. a->a).    arr2 f = trace "id" $ Id2
-
-"par"   forall (r::      Arr (a,b) ((a,b),()))
-               (frst::   Arr (a,b) a)
-               (pierce:: Arr (a,b) ((a,()),b))
-               (first1:: Arr a b -> Arr (a,d) (b,d))
-               (swap::   Arr (a,b) (b,a))
-               (i::      Arr a a) f g.
-                r `next` (frst `next`
-                     ((pierce `next` (first1 (frst `next` f) `next` swap)) `next`
-                     ((pierce `next` (first1 (frst `next` g) `next` swap)) `next` (r `next` (frst `next` i))))) = trace "par" $ _
+"raise" forall (f::a->(a,())).         arr2 f = trace "raise" $ Raise
+"rais2" forall (f::a->((a, () ),() )  ).    arr2 f = trace "rais2" $ error "rais2"
  #-}
---l :: Arr a b -> Arr a b -> _ -> _
-l f g h= ((Pierce `next` (First (Arr fst `next` f) `next` Arr (\(a,b)->(b,a) )) `next`
-         ((Pierce `next` (First (Arr fst `next` f) `next` Arr (\(a,b)->(b,a) )) `next` h))))
+{-
+---}
 
-data Arr a b where
-    Raise :: Arr (a,b) ((a,b),())
-    Pierce :: Arr (a,b) ((a,()),b)
-    Fst :: Arr (a,b) a
-    Bump :: Arr a (a,())
-    Id2 :: Arr a a
-    Swap :: Arr (a,b) (b,a)
-    Arr :: (a -> b) -> Arr a b
-    First :: Arr a b -> Arr (a, d) (b, d)
-    Second :: Arr a b -> Arr (d, a) (d, b)
-    Effect :: f a b -> Arr a b
-    (:***) :: Arr a b -> Arr c d -> Arr (a,c) (b,d)
-    Next :: Arr a c -> Arr c b -> Arr a b
-    Loop :: Arr (a, d) (b, d) -> Arr a b
-    LoopD :: e -> ((a, e) -> (b, e)) -> Arr a b
-    Init :: b -> Arr b b
-    Fan :: Arr a b -> Arr a c -> Arr a (b,c)
+data Arr m a b where
+    Raise :: Arr m a (a,())
+    Pierce :: Arr m (a,b) ((a,()),b)
+    Pierce3 :: Arr m (a,b) ((a,()),(a,b))
+    Promote31 :: Arr m (a,b,c) ((a,()),(b,c))
+    Promote32 :: Arr m (a,b,c) ((b,()),(a,c))
+    Promote33 :: Arr m (a,b,c) ((c,()),(a,b))
+    Fst :: Arr m (a,b) a
+    Bump :: Arr m a (a,())
+    Id2 :: Arr m a a
+    Swap :: Arr m (a,b) (b,a)
+    Swap3 :: Arr m (c,(a,b)) (a,b,c)
+    Arr :: (a -> b) -> Arr m a b
+    First :: Arr m a b -> Arr m (a, d) (b, d)
+    Second :: Arr m a b -> Arr m (d, a) (d, b)
+    Effect :: m a b -> Arr m a b
+    (:***) :: Arr m a b -> Arr m c d -> Arr m (a,c) (b,d)
+    (:>>>) :: Arr m a c -> Arr m c b -> Arr m a b
+    Loop :: Arr m (a, d) (b, d) -> Arr m a b
+    LoopD :: e -> ((a, e) -> (b, e)) -> Arr m a b
+    Init :: b -> Arr m b b
+    Fan :: Arr m a b -> Arr m a c -> Arr m a (b,c)
 
 {-# NOINLINE arr2 #-}
-arr2 :: (a->b) -> Arr a b
+arr2 :: (a->b) -> Arr m a b
 arr2 = Arr
-{-# NOINLINE first2 #-}
-first2 :: Arr (a,b) ((a,()),b)
-first2 = Pierce
 {-# NOINLINE bump #-}
-bump :: Arr Int (Int,())
+bump :: Arr m Int (Int,())
 bump = Bump
 
-(>:>) :: Arr a c -> Arr c b -> Arr a b
-f >:> g = Next f g
-{-# NOINLINE next #-}
-next :: Arr a c -> Arr c b -> Arr a b
-next = (>:>)
+arrow :: Arr m (Int,Integer) (Int,Integer)
+arrow = proc (x,y) -> do
+    a <- arr (+1) -< x
+    b <- arr (+2) -< y
+    c <- arr (+3) -< x
+    returnA -< (a+c,b)
 
-instance Show (Arr a b) where
+main :: IO ()
+main = do
+    draw $ take 2 $ iterate normalize arrow
+
+type Traversal = forall a b m. Arr m a b -> Arr m a b
+imap :: Traversal  -> Traversal
+imap h (First f) = First (h f)
+imap h (f :>>> g) = h f :>>> h g
+imap h (Loop f) = Loop (h f)
+imap h x = x
+
+norm :: Arr m a b -> Arr m a b
+norm (Pierce :>>> (First (Fst :>>> f) :>>> Swap)) = First f :>>> Swap
+norm ((First f :>>> Swap) :>>> (First g :>>> Swap)) = f :*** g
+norm (Raise :>>> Fst) = Id2
+norm (Raise :>>> (Fst :>>> g)) = g
+norm (Id2 :>>> g) = g
+norm (g :>>> Id2) = g
+{-
+---}
+norm (Arr f :>>> Arr g) = Arr (g . f)           -- original and below
+norm (First (Arr f)) = Arr (f `cross` id)
+norm (Arr f :>>> LoopD i g) = LoopD i (g . (f `cross` id))
+norm (LoopD i f :>>> Arr g) = LoopD i ((g `cross` id) . f)
+norm (LoopD i f :>>> LoopD j g) = LoopD (i,j) (assoc' (juggle' (g `cross` id) . (f `cross` id)))
+norm (Loop (LoopD i f)) = LoopD i (trace' (juggle' f))
+norm (First (LoopD i f)) = LoopD i (juggle' (f `cross` id))
+norm (Loop (Arr f)) = Arr (trace' f)
+norm (Init i) = LoopD i swap
+norm e = e
+--normalize ArrowChoice?
+
+everywhere :: Traversal -> Traversal
+everywhere h =h. imap (everywhere h)
+
+normalize :: Arr m a b -> Arr m a b
+normalize = everywhere norm
+
+swap (x,y) = (y,x)
+cross f g (a,b) = (f a,g b)
+assoc ((x,y),z) = (x,(y,z))
+assoc' f = assoc . f . unassoc
+unassoc (x,(y,z)) = ((x,y),z)
+juggle ((x,y),z) = ((x,z),y)
+juggle' f = juggle . f . juggle
+trace' f x = let (y,z) = f (x,z) in y
+
+instance Show (Arr m a b) where
     show (Arr _) = "Arr"
     show (Id2) = "Id2"
     show (Fst) = "Fst"
     show (Raise) = "Raise"
+    show (Promote31) = "Promote31"
+    show (Promote32) = "Promote31"
+    show (Promote33) = "Promote33"
     show (Pierce) = "Pierce"
+    show (Pierce3) = "Pierce3"
     show (Bump) = "Bump"
     show (Swap) = "Swap"
+    show (Swap3) = "Swap3"
     show (First f) = "First " ++ show f
     show (Second f) = "Second " ++ show f
     show (Effect _) = "Effect"
-    show (Next f g) = "(" ++ show f ++ " >:> " ++ show g ++ ")"
+    show (f :>>> g) = "(" ++ show f ++ " >>> " ++ show g ++ ")"
     show (f :*** g) = "[" ++ show f ++ " *** " ++ show g ++ "]"
     show (Loop f) = "Loop " ++ show f
     show (LoopD _ _) = "LoopD"
     show (Init _) = "Init"
     show (Fan f g) = "<" ++ show f ++ " &&& " ++ show g ++ ">"
 
-instance Category (Arr ) where
+instance Category (Arr m) where
   id = arr2 id
-  (.) = flip next
+  (.) = flip (:>>>)
 
-instance Arrow (Arr ) where
+instance Arrow (Arr m) where
     arr = arr2
     first = First
     second = Second
     (***) = (:***)
     (&&&) = Fan
-instance ArrowLoop (Arr ) where
+instance ArrowLoop (Arr m) where
     loop = Loop
-instance ArrowInit (Arr ) where
+instance ArrowInit (Arr m) where
     init = Init
 class ArrowLoop a => ArrowInit a where
     init :: b -> a b b
 
-arrow :: Arr (Int,Int) (Int,Int)
-arrow = proc (x,y) -> do
-    a <- arr (+1) -< x
-    b <- arr (+2) -< y
-    returnA -< (a,b)
-
-main :: IO ()
-main = do
-    print arrow
+draw x = putStrLn $ intercalate "\n\n" $ map show x
