@@ -41,7 +41,6 @@ data Arr m a b where
     Promote32 :: Arr m (a,b,c) ((b,()),(a,c))
     Promote33 :: Arr m (a,b,c) ((c,()),(a,b))
     Fst :: Arr m (a,b) a
-    Bump :: Arr m a (a,())
     Id2 :: Arr m a a
     Swap :: Arr m (a,b) (b,a)
     Swap3 :: Arr m (c,(a,b)) (a,b,c)
@@ -59,16 +58,13 @@ data Arr m a b where
 {-# NOINLINE arr2 #-}
 arr2 :: (a->b) -> Arr m a b
 arr2 = Arr
-{-# NOINLINE bump #-}
-bump :: Arr m Int (Int,())
-bump = Bump
 
 arrow :: Arr m (Int,Integer) (Int,Integer)
 arrow = proc (x,y) -> do
     a <- arr (+1) -< x
-    b <- arr (+2) -< y
-    c <- arr (+3) -< x
-    returnA -< (a+c,b)
+    b <- arr (+2) -< x
+    c <- arr (+3) -< y
+    returnA -< (a,c)
 
 main :: IO ()
 main = do
@@ -83,6 +79,9 @@ imap h x = x
 
 norm :: Arr m a b -> Arr m a b
 norm (Pierce :>>> (First (Fst :>>> f) :>>> Swap)) = First f :>>> Swap
+norm ((Pierce3 :>>> (First (Fst :>>> f) :>>> Swap3)) :>>>
+     ((Promote31 :>>> (First (Fst :>>> g) :>>> Swap3)) :>>>
+     ((Promote31 :>>> (First (Fst :>>> h) :>>> Swap3)) :>>> i))) = ( (Fan f g) :*** h) :>>> Arr (\((a,b),c) -> (a,b,c)) :>>> i
 norm ((First f :>>> Swap) :>>> (First g :>>> Swap)) = f :*** g
 norm (Raise :>>> Fst) = Id2
 norm (Raise :>>> (Fst :>>> g)) = g
@@ -127,7 +126,6 @@ instance Show (Arr m a b) where
     show (Promote33) = "Promote33"
     show (Pierce) = "Pierce"
     show (Pierce3) = "Pierce3"
-    show (Bump) = "Bump"
     show (Swap) = "Swap"
     show (Swap3) = "Swap3"
     show (First f) = "First " ++ show f
