@@ -79,8 +79,8 @@ main = do
     print $ e 4
     --runQ [| ( [arrow|proc n -> (+3) -< n|] )  |] >>= print
     runQ [arrow|
-        proc (n,a) -> do
-            (+1) -< a
+        proc (a,n) -> do
+            c <- (+1) -< a
             returnA -< 1+n |]
     print "done"
     -- draw $ take 2 $ iterate normalize arrow
