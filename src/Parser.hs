@@ -1,4 +1,5 @@
 {-# LANGUAGE TemplateHaskell #-}
+-- Thomas Bereknyei 2015
 module Parser where
 import Language.Haskell.Exts.Annotated
 import qualified Language.Haskell.Exts.Annotated.Syntax as S
@@ -56,7 +57,7 @@ correction pats (Qualifier l exp) = sndArr l >:> dupArr l
 arrowStmtToExp :: (Eq l,SrcInfo l) => [S.Pat l] -> S.Stmt l -> S.Exp l
 arrowStmtToExp pats (Generator l pattern exp) = firstArr l $ arrowToExp pats exp
 arrowStmtToExp pats (Qualifier l exp) = firstArr l $ arrowToExp pats exp
-arrowStmtToExp pats (LetStmt l bs@(BDecls l2 decls)) = firstArr l $ arrLambda l pats (Let l bs 
+--arrowStmtToExp pats (LetStmt l bs@(BDecls l2 decls)) = firstArr l $ arrLambda l pats (Let l bs
 arrowStmtToExp _ _ = error "not implemented yet TODO"
 
 collectPats ((Generator _ pattern _):rest) = pattern : collectPats rest
