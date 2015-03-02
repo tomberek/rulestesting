@@ -3,6 +3,7 @@
 module Examples where
 import Parser
 import Control.Arrow
+import Debug.Trace
 
 h :: Arrow a => a Int Int
 h = [arrow|proc n -> arr (+1) -< n+2|]
@@ -10,14 +11,14 @@ h = [arrow|proc n -> arr (+1) -< n+2|]
 f :: Int -> Int
 f = [arrow|
     proc n -> do
+    _ <- ((-)3) -< n
     returnA -< n+2
     |]
---e :: Int -> Int
+e :: Int -> Int
 e = [arrow|
     proc n -> do
-    a <- (+1) -< n
-    b <- (+2) -< a
-    id -< (a,b+2)
+    Left a <- arr (\x -> Left x) -< n
+    returnA -< a
     |]
 {-
 i = [arrow|

@@ -71,17 +71,22 @@ arr3 = proc (x,y) -> do
         b <- arr (+2) -< x
         c <- arr (+3) -< y
         returnA -< (a,c)
+arr4 :: Int -> Int
+arr4 = proc n -> do
+    Just a <- arr (\x->Just $ 1+x) -< n
+    returnA -< a
 
 main :: IO ()
 main = do
     --print $ h 4
     print $ f 4
+    print $ arr4 4
     print $ e 4
-    --runQ [| ( [arrow|proc n -> (+3) -< n|] )  |] >>= print
     runQ [arrow|
-        proc (a,n) -> do
-            c <- (+1) -< a
-            returnA -< 1+n |]
+        proc n -> do
+        Just a <- arr (\x -> Just x) -< n
+        returnA -< a
+            |]
     print "done"
     -- draw $ take 2 $ iterate normalize arrow
 

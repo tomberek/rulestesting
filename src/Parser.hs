@@ -25,17 +25,17 @@ arrow = QuasiQuoter {
 x >:> y = infixApp (ann x) x (op (ann x) $ name (ann x) ">>>") y
 x &:& y = infixApp (ann x) x (op (ann x) $ name (ann x) "&&&") y
 firstArr l x = app l (var l $ name l "first") x
-dupArr l = app l (arrowE l) $ lamE l [charP l 'x'] $ tuple l [var l (name l "x"),var l (name l "x")]
+dupArr l = app l (arrowE l) $ lamE l [pvar l $ name l "x"] $ tuple l [var l (name l "x"),var l (name l "x")]
 sndArr l = app l (arrowE l) $ var l $ name l "snd"
 fstArr l = app l (arrowE l) $ var l $ name l "fst"
 arrowE l = var l $ name l "arr"
 returnArr l = var l $ name l "returnA"
-arrLambda l pats exp = App l (arrowE l) $ Lambda l [pTuple l pats] exp
+arrLambda l pats exp = App l (arrowE l) $ Lambda l [pTuple l $ map (PIrrPat l) pats] exp
 
 arrowToExp :: (Eq l,SrcInfo l) => [S.Pat l] -> S.Exp l -> S.Exp l
 arrowToExp pats (Proc l pattern exp) = arrowToExp (pattern:pats) exp
 arrowToExp pats (LeftArrApp l exp exp2) = arrLambda l pats exp2 >:> exp
-arrowToExp pats (Do l statements) = setup >:> helper statements >:> fstArr l
+arrowToExp pats (Do l statements) = setup >:> dupArr l >:> helper statements >:> fstArr l
     where
         helper (s:[]) = arrowStmtToExp allpats s
         helper (s:ss) = arrowStmtToExp allpats s >:> correction allpats s >:> helper ss
@@ -44,21 +44,20 @@ arrowToExp pats (Do l statements) = setup >:> helper statements >:> fstArr l
                             $ tail allpats)
         allpats = pats ++ (collectPats statements)
 
-arrowToExp pats (RightArrApp l exp exp2) = undefined
+--arrowToExp pats (RightArrApp l exp exp2) = undefined
 arrowToExp _ exp = exp
 
---arrowStmtToDec :: SrcInfo l => [Language.Haskell.Exts.Annotated.Pat l] -> Language.Haskell.Exts.Annotated.Stmt l -> Language.Haskell.Exts.Annotated.Exp l
 correction pats (Generator l pattern exp) =
     arrLambda l [pTuple l [pattern],
                  pTuple l (replace pattern (PWildCard l) pats)]
-                 $ promotePattern (PTuple l Boxed pats)
-correction pats (Qualifier l exp) = sndArr l
+                 (promotePattern (PTuple l Boxed pats)) >:> dupArr l
+correction pats (Qualifier l exp) = sndArr l >:> dupArr l
 
 arrowStmtToExp :: (Eq l,SrcInfo l) => [S.Pat l] -> S.Stmt l -> S.Exp l
-arrowStmtToExp pats (Generator l pattern exp) = paren l ((paren l $ arrowToExp pats exp) &:& returnArr l)
-arrowStmtToExp pats (Qualifier l exp) = paren l ((paren l $ arrowToExp pats exp) &:& returnArr l)
+arrowStmtToExp pats (Generator l pattern exp) = firstArr l $ arrowToExp pats exp
+arrowStmtToExp pats (Qualifier l exp) = firstArr l $ arrowToExp pats exp
+arrowStmtToExp pats (LetStmt l bs@(BDecls l2 decls)) = firstArr l $ arrLambda l pats (Let l bs 
 arrowStmtToExp _ _ = error "not implemented yet TODO"
---arrowStmtToExp pats (LetStmt l (BDecls l2 binds)) = arrLambda l pats _
 
 collectPats ((Generator _ pattern _):rest) = pattern : collectPats rest
 collectPats (_:rest) = collectPats rest
@@ -67,7 +66,10 @@ collectPats _ = []
 promotePattern (PVar l name) = Var l (UnQual l name)
 promotePattern (PTuple l b pats) = Tuple l b $ map promotePattern pats
 promotePattern (PParen l pat) = Paren l $ promotePattern pat
-promotePattern (PApp l qname pats) = Var l qname
+promotePattern (PIrrPat l pat) = promotePattern pat
+promotePattern (PApp l qname pats) = appFun (repeat l) (Con l qname) $ map promotePattern pats
+promotePattern (PList l pats) = List l $ map promotePattern pats
+promotePattern (PWildCard l) = var l $ name l "undefined"
 
 
 {-
