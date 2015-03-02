@@ -33,7 +33,7 @@ arrowE l = var l $ name l "arr"
 returnArr l = var l $ name l "returnA"
 arrLambda l pats exp = App l (arrowE l) $ Lambda l [pTuple l $ map (PIrrPat l) pats] exp
 
-arrowToExp :: (Eq l,SrcInfo l) => [S.Pat l] -> S.Exp l -> S.Exp l
+arrowToExp :: (Show l,Eq l,SrcInfo l) => [S.Pat l] -> S.Exp l -> S.Exp l
 arrowToExp pats (Proc l pattern exp) = arrowToExp (pattern:pats) exp
 arrowToExp pats (LeftArrApp l exp exp2) = arrLambda l pats exp2 >:> exp
 arrowToExp pats (Do l statements) = setup >:> dupArr l >:> helper statements >:> fstArr l
@@ -41,7 +41,7 @@ arrowToExp pats (Do l statements) = setup >:> dupArr l >:> helper statements >:>
         helper (s:[]) = arrowStmtToExp allpats s
         helper (s:ss) = arrowStmtToExp allpats s >:> correction allpats s >:> helper ss
         setup = arrLambda l pats $ Tuple l Boxed $ (promotePattern $ head allpats) :
-                        (map (const $ Var l $ UnQual l $ name l "undefined")
+                        (map (const $ app l (Var l $ UnQual l $ name l "error") (strE l $ "variable not defined at " ++ (show $ getPointLoc l)) )
                             $ tail allpats)
         allpats = pats ++ (collectPats statements)
 
@@ -54,7 +54,7 @@ correction pats (Generator l pattern exp) =
                  (promotePattern (PTuple l Boxed pats)) >:> dupArr l
 correction pats (Qualifier l exp) = sndArr l >:> dupArr l
 
-arrowStmtToExp :: (Eq l,SrcInfo l) => [S.Pat l] -> S.Stmt l -> S.Exp l
+arrowStmtToExp :: (Show l,Eq l,SrcInfo l) => [S.Pat l] -> S.Stmt l -> S.Exp l
 arrowStmtToExp pats (Generator l pattern exp) = firstArr l $ arrowToExp pats exp
 arrowStmtToExp pats (Qualifier l exp) = firstArr l $ arrowToExp pats exp
 --arrowStmtToExp pats (LetStmt l bs@(BDecls l2 decls)) = firstArr l $ arrLambda l pats (Let l bs

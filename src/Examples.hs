@@ -17,7 +17,7 @@ f = [arrow|
 e :: Int -> Int
 e = [arrow|
     proc n -> do
-    Left a <- arr (\x -> Left x) -< n
+    Left a <- arr (\x -> Left x) -< a
     returnA -< a
     |]
 {-
