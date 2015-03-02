@@ -1,5 +1,7 @@
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE Arrows #-}
 module Main where
 
@@ -9,6 +11,10 @@ import Prelude hiding (id,(.))
 import Control.Monad.Fix
 import Debug.Trace
 import Data.List (intercalate)
+import Language.Haskell.Meta
+import Language.Haskell.TH (runQ)
+import Examples
+import Parser
 
 {-# RULES
 "id"    forall (f::forall a. a->a).    arr2 f = trace "id2" $ Id2
@@ -59,16 +65,25 @@ data Arr m a b where
 arr2 :: (a->b) -> Arr m a b
 arr2 = Arr
 
-arrow :: Arr m (Int,Integer) (Int,Integer)
-arrow = proc (x,y) -> do
-    a <- arr (+1) -< x
-    b <- arr (+2) -< x
-    c <- arr (+3) -< y
-    returnA -< (a,c)
+arr3 :: Arr m (Int,Integer) (Int,Integer)
+arr3 = proc (x,y) -> do
+        a <- arr (+1) -< x
+        b <- arr (+2) -< x
+        c <- arr (+3) -< y
+        returnA -< (a,c)
 
 main :: IO ()
 main = do
-    draw $ take 2 $ iterate normalize arrow
+    --print $ h 4
+    print $ f 4
+    print $ e 4
+    --runQ [| ( [arrow|proc n -> (+3) -< n|] )  |] >>= print
+    runQ [arrow|
+        proc (n,a) -> do
+            (+1) -< a
+            returnA -< 1+n |]
+    print "done"
+    -- draw $ take 2 $ iterate normalize arrow
 
 type Traversal = forall a b m. Arr m a b -> Arr m a b
 imap :: Traversal  -> Traversal
