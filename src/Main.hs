@@ -5,16 +5,21 @@
 {-# LANGUAGE Arrows #-}
 module Main where
 
-import Control.Arrow
+import Control.Arrow hiding (arr)
+import qualified Control.Arrow as A
 import Control.Category
 import Prelude hiding (id,(.))
 import Control.Monad.Fix
 import Debug.Trace
 import Data.List (intercalate)
 import Language.Haskell.Meta
-import Language.Haskell.TH (runQ)
-import Examples
+import Language.Haskell.TH
+import Language.Haskell.TH.Syntax
+import Examples hiding (arr)
 import Parser
+import qualified Control.CCA as C
+import qualified Control.CCA.CCNF as CCNF
+import qualified Control.CCA.Types as Types
 
 {-# RULES
 "id"    forall (f::forall a. a->a).    arr2 f = trace "id2" $ Id2
@@ -76,20 +81,51 @@ arr4 = proc n -> do
     Just a <- arr (\x->Just $ 1+x) -< n
     returnA -< a
 
+--g =  [||  [arrow| proc n -> arr (+1) -< n |] :: Int -> Int ||]
+
+arr :: Arrow a => (b->c) -> a b c
+arr y= trace "hello" $ A.arr y
+
+runCCNF :: e -> ((b, e) -> (c, e)) -> [b] -> [c]
+runCCNF i f = g i
+        where g i (x:xs) = let (y, i') = f (x, i)
+                            in y : g i' xs
+
+nth' :: Int -> (b, ((), b) -> (a, b)) -> a
+nth' n (i, f) = aux n i
+  where
+    aux n i = x `seq` if n == 0 then x else aux (n-1) i'
+      where (x, i') = f ((), i)
+runIt x = nth' 0
+
+(a,optimized) = $(CCNF.normOpt f)
+
+out :: Arr m Int Int
+out = $(CCNF.norm f)
+boring :: Arr m Int Int
+boring = h
 main :: IO ()
 main = do
-    --print $ h 4
-    print $ f 4
-    print $ arr4 4
-    print $ e 4
+    --(runQ $ unTypeQ g) >>= print
+    print $ optimized 4
+    print out
+    print boring
+    --print $ _
+    --print $ f 4
+    --print $ e 4
+    {-}
     runQ [arrow|
         proc n -> do
         Just a <- arr (\x -> Just x) -< n
-        returnA -< a
+        d <- arr (*2) -< a*1
+        returnA -< n
             |]
     print "done"
+    {-
+    --}
+    --}
     -- draw $ take 2 $ iterate normalize arrow
-
+{--
 type Traversal = forall a b m. Arr m a b -> Arr m a b
 imap :: Traversal  -> Traversal
 imap h (First f) = First (h f)
@@ -135,6 +171,7 @@ unassoc (x,(y,z)) = ((x,y),z)
 juggle ((x,y),z) = ((x,z),y)
 juggle' f = juggle . f . juggle
 trace' f x = let (y,z) = f (x,z) in y
+---}
 
 instance Show (Arr m a b) where
     show (Arr _) = "Arr"
@@ -157,7 +194,6 @@ instance Show (Arr m a b) where
     show (LoopD _ _) = "LoopD"
     show (Init _) = "Init"
     show (Fan f g) = "<" ++ show f ++ " &&& " ++ show g ++ ">"
-
 instance Category (Arr m) where
   id = arr2 id
   (.) = flip (:>>>)
@@ -174,5 +210,7 @@ instance ArrowInit (Arr m) where
     init = Init
 class ArrowLoop a => ArrowInit a where
     init :: b -> a b b
+instance C.ArrowInit (Arr m) where
+    init = Init
 
 draw x = putStrLn $ intercalate "\n\n" $ map show x
