@@ -9,7 +9,7 @@ import Control.Arrow hiding (arr)
 import qualified Control.Arrow as A
 import Control.Category
 import Prelude hiding (id,(.))
-import Control.Monad.Fix
+
 import Debug.Trace
 import Data.List (intercalate)
 import Language.Haskell.Meta
@@ -75,11 +75,11 @@ arr3 = proc (x,y) -> do
         a <- arr (+1) -< x
         b <- arr (+2) -< x
         c <- arr (+3) -< y
-        returnA -< (a,c)
+        id -< (a,c)
 arr4 :: Int -> Int
 arr4 = proc n -> do
     Just a <- arr (\x->Just $ 1+x) -< n
-    returnA -< a
+    id -< a
 
 --g =  [||  [arrow| proc n -> arr (+1) -< n |] :: Int -> Int ||]
 
@@ -102,8 +102,9 @@ runIt x = nth' 0
 
 out :: Arr m Int Int
 out = $(CCNF.norm f)
+
 boring :: Arr m Int Int
-boring = h
+boring = f
 main :: IO ()
 main = do
     --(runQ $ unTypeQ g) >>= print
@@ -113,13 +114,14 @@ main = do
     --print $ _
     --print $ f 4
     --print $ e 4
-    {-}
+    {-
     runQ [arrow|
         proc n -> do
         Just a <- arr (\x -> Just x) -< n
-        d <- arr (*2) -< a*1
-        returnA -< n
+        let b = a + a
+        returnA -< b
             |]
+    
     print "done"
     {-
     --}
