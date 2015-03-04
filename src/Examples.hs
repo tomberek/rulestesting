@@ -12,13 +12,13 @@ h :: ArrowInit a => a Int Int
 h = [arrowExp|proc n -> arr (+1) -< n+2 |]
 
 f :: ArrowInit a => a Int Int
-f = [arrow|
+f = [arrowExp|
     proc n -> do
         Just a  <- arr (+1) >>> arr (\x -> Just x) -< n
         let c = a+a
             d = 0
         b <- arr (*10) -< a +5
-        returnA -< d+1
+        returnA -< b+1
     |]
 e :: ArrowInit a => a Int Int
 e = [arrowExp|
@@ -27,7 +27,7 @@ e = [arrowExp|
         returnA -< 20*n
     |]
 
-
+nonLoop :: Int -> Int
 (_,nonLoop) = [arrowExpOpt|
     proc n -> arr id -< n+2
     |]

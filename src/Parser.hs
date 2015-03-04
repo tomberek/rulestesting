@@ -2,7 +2,7 @@
 {-# LANGUAGE ViewPatterns #-}
 -- Thomas Bereknyei 2015
 module Parser where
-import Language.Haskell.Exts.Annotated
+import Language.Haskell.Exts
 import qualified Language.Haskell.Exts.Annotated.Syntax as S
 import qualified Language.Haskell.Exts.Syntax as E
 import Language.Haskell.Exts.Annotated.Simplify
@@ -21,14 +21,14 @@ import Data.Generics.Uniplate.Data
 
 arrowParseMode :: ParseMode
 arrowParseMode = defaultParseMode{extensions=[EnableExtension Arrows]}
-parseArrow :: String -> ParseResult (S.Exp SrcSpanInfo)
+parseArrow :: String -> ParseResult (E.Exp )
 parseArrow = parseExpWithMode arrowParseMode
 
 l = norm
 arrow :: QuasiQuoter
 arrow = QuasiQuoter {
     quoteExp = \input -> case parseArrow input of
-        ParseOk result -> aToExp [] $ sExp result
+        ParseOk result -> aToExp [] $ result
         --ParseOk result -> returnQ $ toExp $ sExp $ arrowToExp [] result
         ParseFailed l err -> error $ show l ++ show err
   , quotePat = error "cannot be patterns."
@@ -42,7 +42,7 @@ getExp (a :>>> b) = [| $(getExp a) >>> $(getExp b) |]
 arrowExp :: QuasiQuoter
 arrowExp = QuasiQuoter {
     quoteExp = \input -> case parseArrow input of
-        ParseOk result -> norm $ AExp $ normToExp [] $ sExp result
+        ParseOk result -> norm $ AExp $ normToExp [] $ result
         ParseFailed l err -> error $ show l ++ show err
   , quotePat = error "cannot be patterns."
   , quoteDec = error "cannot be declarations."
@@ -51,7 +51,7 @@ arrowExp = QuasiQuoter {
 arrowExpOpt :: QuasiQuoter
 arrowExpOpt = QuasiQuoter {
     quoteExp = \input -> case parseArrow input of
-        ParseOk result -> normOpt $ AExp $ normToExp [] $ sExp result
+        ParseOk result -> normOpt $ AExp $ normToExp [] $ result
         ParseFailed l err -> error $ show l ++ show err
   , quotePat = error "cannot be patterns."
   , quoteDec = error "cannot be declarations."
@@ -65,7 +65,7 @@ normToExp pats@(returnQ . TupP -> stack) (E.LeftArrApp (normToExp pats -> expr) 
 normToExp pats (E.Do statements) =
     foldl1 (:>>>) expressions :>>> Arr [|fst|]
         where (_,expressions) = mapAccumL normStmt pats statements -- need stack for nexted do!
-normToExp _ expr = help $ toExp expr
+normToExp _ expr = _ $ h expr
 
 normStmt :: [TH.Pat] -> E.Stmt -> ([TH.Pat],AExp)
 normStmt stack (E.Generator _ (toPat -> pattern) expr) = (pattern:trim stack,normCmd stack expr)
@@ -81,9 +81,11 @@ listTup [s] = TupP [s]
 listTup (s:ss) = TupP [s,TupP ss]
 listTup _ = error "empty stack"
 
-h = transformM arg
-    where arg (TH.AppE (TH.VarE (Name (OccName "arr") NameS)) b) = [| Arr b |]
-          arg x = returnQ x
+h = transform arg
+    where
+        arg (E.App (E.Var (E.UnQual (E.Ident "arr"))) b) = app (function "Arr") b
+        arg (E.Var (E.UnQual (E.Ident "returnA"))) = app (function "Arr") (var $ name "id")
+        arg x = error "more transforms"
 help (TH.AppE (TH.VarE (Name (OccName "arr") NameS)) b) = Arr $ returnQ b
 help (TH.VarE (Name (OccName "returnA") NameS)) = Arr [| id |]
 help x = error $ show x
