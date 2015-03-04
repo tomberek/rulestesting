@@ -44,33 +44,33 @@ import qualified Control.CCA.Types as Types
 {-
 ---}
 
-data Arr m a b where
-    Raise :: Arr m a (a,())
-    Pierce :: Arr m (a,b) ((a,()),b)
-    Pierce3 :: Arr m (a,b) ((a,()),(a,b))
-    Promote31 :: Arr m (a,b,c) ((a,()),(b,c))
-    Promote32 :: Arr m (a,b,c) ((b,()),(a,c))
-    Promote33 :: Arr m (a,b,c) ((c,()),(a,b))
-    Fst :: Arr m (a,b) a
-    Id2 :: Arr m a a
-    Swap :: Arr m (a,b) (b,a)
-    Swap3 :: Arr m (c,(a,b)) (a,b,c)
-    Arr :: (a -> b) -> Arr m a b
-    First :: Arr m a b -> Arr m (a, d) (b, d)
-    Second :: Arr m a b -> Arr m (d, a) (d, b)
-    Effect :: m a b -> Arr m a b
-    (:***) :: Arr m a b -> Arr m c d -> Arr m (a,c) (b,d)
-    (:>>>) :: Arr m a c -> Arr m c b -> Arr m a b
-    Loop :: Arr m (a, d) (b, d) -> Arr m a b
-    LoopD :: e -> ((a, e) -> (b, e)) -> Arr m a b
-    Init :: b -> Arr m b b
-    Fan :: Arr m a b -> Arr m a c -> Arr m a (b,c)
+data ArrM m a b where
+    Raise :: ArrM m a (a,())
+    Pierce :: ArrM m (a,b) ((a,()),b)
+    Pierce3 :: ArrM m (a,b) ((a,()),(a,b))
+    Promote31 :: ArrM m (a,b,c) ((a,()),(b,c))
+    Promote32 :: ArrM m (a,b,c) ((b,()),(a,c))
+    Promote33 :: ArrM m (a,b,c) ((c,()),(a,b))
+    Fst :: ArrM m (a,b) a
+    Id2 :: ArrM m a a
+    Swap :: ArrM m (a,b) (b,a)
+    Swap3 :: ArrM m (c,(a,b)) (a,b,c)
+    ArrM :: (a -> b) -> ArrM m a b
+    FirstM :: ArrM m a b -> ArrM m (a, d) (b, d)
+    Second :: ArrM m a b -> ArrM m (d, a) (d, b)
+    Effect :: m a b -> ArrM m a b
+    (:****) :: ArrM m a b -> ArrM m c d -> ArrM m (a,c) (b,d)
+    (:>>>>) :: ArrM m a c -> ArrM m c b -> ArrM m a b
+    LoopM :: ArrM m (a, d) (b, d) -> ArrM m a b
+    LoopDM :: e -> ((a, e) -> (b, e)) -> ArrM m a b
+    InitM :: b -> ArrM m b b
+    Fan :: ArrM m a b -> ArrM m a c -> ArrM m a (b,c)
 
 {-# NOINLINE arr2 #-}
-arr2 :: (a->b) -> Arr m a b
-arr2 = Arr
+arr2 :: (a->b) -> ArrM m a b
+arr2 = ArrM
 
-arr3 :: Arr m (Int,Integer) (Int,Integer)
+arr3 :: ArrM m (Int,Integer) (Int,Integer)
 arr3 = proc (x,y) -> do
         a <- arr (+1) -< x
         b <- arr (+2) -< x
@@ -98,29 +98,31 @@ nth' n (i, f) = aux n i
       where (x, i') = f ((), i)
 runIt x = nth' 0
 
+optimized :: Int -> Int
 (a,optimized) = $(CCNF.normOpt f)
 
-out :: Arr m Int Int
+out :: ArrM m Int Int
 out = $(CCNF.norm f)
 
-boring :: Arr m Int Int
-boring = f
+boring :: ArrM m Int Int
+boring = e
 main :: IO ()
 main = do
     --(runQ $ unTypeQ g) >>= print
+    runQ [| (\(CCNF.AExp c) -> c) e |]
     print $ optimized 4
     print out
     print boring
+    runQ [arrowExp|
+        proc n -> do
+        returnA -< 2
+        returnA -< n+2
+            |]
+    print "hi"
     --print $ _
     --print $ f 4
     --print $ e 4
     {-
-    runQ [arrow|
-        proc n -> do
-        Just a <- arr (\x -> Just x) -< n
-        let b = a + a
-        returnA -< b
-            |]
     
     print "done"
     {-
@@ -128,33 +130,33 @@ main = do
     --}
     -- draw $ take 2 $ iterate normalize arrow
 {--
-type Traversal = forall a b m. Arr m a b -> Arr m a b
+type Traversal = forall a b m. ArrM m a b -> ArrM m a b
 imap :: Traversal  -> Traversal
-imap h (First f) = First (h f)
+imap h (FirstM f) = FirstM (h f)
 imap h (f :>>> g) = h f :>>> h g
 imap h (Loop f) = Loop (h f)
 imap h x = x
 
-norm :: Arr m a b -> Arr m a b
-norm (Pierce :>>> (First (Fst :>>> f) :>>> Swap)) = First f :>>> Swap
-norm ((Pierce3 :>>> (First (Fst :>>> f) :>>> Swap3)) :>>>
-     ((Promote31 :>>> (First (Fst :>>> g) :>>> Swap3)) :>>>
-     ((Promote31 :>>> (First (Fst :>>> h) :>>> Swap3)) :>>> i))) = ( (Fan f g) :*** h) :>>> Arr (\((a,b),c) -> (a,b,c)) :>>> i
-norm ((First f :>>> Swap) :>>> (First g :>>> Swap)) = f :*** g
+norm :: ArrM m a b -> ArrM m a b
+norm (Pierce :>>> (FirstM (Fst :>>> f) :>>> Swap)) = FirstM f :>>> Swap
+norm ((Pierce3 :>>> (FirstM (Fst :>>> f) :>>> Swap3)) :>>>
+     ((Promote31 :>>> (FirstM (Fst :>>> g) :>>> Swap3)) :>>>
+     ((Promote31 :>>> (FirstM (Fst :>>> h) :>>> Swap3)) :>>> i))) = ( (Fan f g) :*** h) :>>> ArrM (\((a,b),c) -> (a,b,c)) :>>> i
+norm ((FirstM f :>>> Swap) :>>> (FirstM g :>>> Swap)) = f :*** g
 norm (Raise :>>> Fst) = Id2
 norm (Raise :>>> (Fst :>>> g)) = g
 norm (Id2 :>>> g) = g
 norm (g :>>> Id2) = g
 {-
 ---}
-norm (Arr f :>>> Arr g) = Arr (g . f)           -- original and below
-norm (First (Arr f)) = Arr (f `cross` id)
-norm (Arr f :>>> LoopD i g) = LoopD i (g . (f `cross` id))
-norm (LoopD i f :>>> Arr g) = LoopD i ((g `cross` id) . f)
+norm (ArrM f :>>> ArrM g) = ArrM (g . f)           -- original and below
+norm (FirstM (ArrM f)) = ArrM (f `cross` id)
+norm (ArrM f :>>> LoopD i g) = LoopD i (g . (f `cross` id))
+norm (LoopD i f :>>> ArrM g) = LoopD i ((g `cross` id) . f)
 norm (LoopD i f :>>> LoopD j g) = LoopD (i,j) (assoc' (juggle' (g `cross` id) . (f `cross` id)))
 norm (Loop (LoopD i f)) = LoopD i (trace' (juggle' f))
-norm (First (LoopD i f)) = LoopD i (juggle' (f `cross` id))
-norm (Loop (Arr f)) = Arr (trace' f)
+norm (FirstM (LoopD i f)) = LoopD i (juggle' (f `cross` id))
+norm (Loop (ArrM f)) = ArrM (trace' f)
 norm (Init i) = LoopD i swap
 norm e = e
 --normalize ArrowChoice?
@@ -162,7 +164,7 @@ norm e = e
 everywhere :: Traversal -> Traversal
 everywhere h =h. imap (everywhere h)
 
-normalize :: Arr m a b -> Arr m a b
+normalize :: ArrM m a b -> ArrM m a b
 normalize = everywhere norm
 
 swap (x,y) = (y,x)
@@ -175,8 +177,8 @@ juggle' f = juggle . f . juggle
 trace' f x = let (y,z) = f (x,z) in y
 ---}
 
-instance Show (Arr m a b) where
-    show (Arr _) = "Arr"
+instance Show (ArrM m a b) where
+    show (ArrM _) = "Arr"
     show (Id2) = "Id2"
     show (Fst) = "Fst"
     show (Raise) = "Raise"
@@ -187,32 +189,32 @@ instance Show (Arr m a b) where
     show (Pierce3) = "Pierce3"
     show (Swap) = "Swap"
     show (Swap3) = "Swap3"
-    show (First f) = "First " ++ show f
+    show (FirstM f) = "FirstM " ++ show f
     show (Second f) = "Second " ++ show f
     show (Effect _) = "Effect"
-    show (f :>>> g) = "(" ++ show f ++ " >>> " ++ show g ++ ")"
-    show (f :*** g) = "[" ++ show f ++ " *** " ++ show g ++ "]"
-    show (Loop f) = "Loop " ++ show f
-    show (LoopD _ _) = "LoopD"
-    show (Init _) = "Init"
+    show (f :>>>> g) = "(" ++ show f ++ " >>> " ++ show g ++ ")"
+    show (f :**** g) = "[" ++ show f ++ " *** " ++ show g ++ "]"
+    show (LoopM f) = "Loop " ++ show f
+    show (LoopDM _ _) = "LoopD"
+    show (InitM _) = "Init"
     show (Fan f g) = "<" ++ show f ++ " &&& " ++ show g ++ ">"
-instance Category (Arr m) where
+instance Category (ArrM m) where
   id = arr2 id
-  (.) = flip (:>>>)
+  (.) = flip (:>>>>)
 
-instance Arrow (Arr m) where
+instance Arrow (ArrM m) where
     arr = arr2
-    first = First
+    first = FirstM
     second = Second
-    (***) = (:***)
+    (***) = (:****)
     (&&&) = Fan
-instance ArrowLoop (Arr m) where
-    loop = Loop
-instance ArrowInit (Arr m) where
-    init = Init
+instance ArrowLoop (ArrM m) where
+    loop = LoopM
+instance ArrowInit (ArrM m) where
+    init = InitM
 class ArrowLoop a => ArrowInit a where
     init :: b -> a b b
-instance C.ArrowInit (Arr m) where
-    init = Init
+instance C.ArrowInit (ArrM m) where
+    init = InitM
 
 draw x = putStrLn $ intercalate "\n\n" $ map show x

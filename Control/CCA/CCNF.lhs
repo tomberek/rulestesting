@@ -2,7 +2,7 @@
 
 > module Control.CCA.CCNF 
 >   (norm, normOpt, 
->    pprNorm, pprNormOpt, printCCA, ASyn,
+>    pprNorm, pprNormOpt, printCCA, ASyn(..),AExp(..),
 >    cross, dup, swap, assoc, unassoc, juggle, trace, mirror, untag, tagT, untagT) where
 
 #if __GLASGOW_HASKELL__ >= 610

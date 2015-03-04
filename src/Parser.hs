@@ -11,10 +11,12 @@ import Language.Haskell.TH.Quote
 import Language.Haskell.TH.Syntax
 import qualified Language.Haskell.TH.Syntax as TH
 import qualified Language.Haskell.TH.Lib as TH
+import Language.Haskell.TH
 import Data.List (mapAccumL)
 import Debug.Trace
-import Control.Arrow((>>>))
+import Control.Arrow(arr,(>>>),first)
 import qualified Control.CCA as C
+import Control.CCA.CCNF
 import Data.Generics.Uniplate.Data
 
 arrowParseMode :: ParseMode
@@ -22,6 +24,7 @@ arrowParseMode = defaultParseMode{extensions=[EnableExtension Arrows]}
 parseArrow :: String -> ParseResult (S.Exp SrcSpanInfo)
 parseArrow = parseExpWithMode arrowParseMode
 
+l = norm
 arrow :: QuasiQuoter
 arrow = QuasiQuoter {
     quoteExp = \input -> case parseArrow input of
@@ -32,6 +35,70 @@ arrow = QuasiQuoter {
   , quoteDec = error "cannot be declarations."
   , quoteType = error "cannot be types."
   }
+
+getExp (Arr e) = [| Arr $e |]
+getExp (First e) = [| first $(getExp e) |]
+getExp (a :>>> b) = [| $(getExp a) >>> $(getExp b) |]
+arrowExp :: QuasiQuoter
+arrowExp = QuasiQuoter {
+    quoteExp = \input -> case parseArrow input of
+        ParseOk result -> norm $ AExp $ normToExp [] $ sExp result
+        ParseFailed l err -> error $ show l ++ show err
+  , quotePat = error "cannot be patterns."
+  , quoteDec = error "cannot be declarations."
+  , quoteType = error "cannot be types."
+  }
+arrowExpOpt :: QuasiQuoter
+arrowExpOpt = QuasiQuoter {
+    quoteExp = \input -> case parseArrow input of
+        ParseOk result -> normOpt $ AExp $ normToExp [] $ sExp result
+        ParseFailed l err -> error $ show l ++ show err
+  , quotePat = error "cannot be patterns."
+  , quoteDec = error "cannot be declarations."
+  , quoteType = error "cannot be types."
+  }
+nextExp x y = [| $x :>>> $y |]
+normToExp :: [TH.Pat] -> E.Exp -> AExp
+normToExp pats (E.Proc _ (toPat -> pattern) expr) = normToExp (pattern:pats) expr
+normToExp pats@(returnQ . TupP -> stack) (E.LeftArrApp (normToExp pats -> expr) expr2) =
+    Arr [| (\ $stack -> $(returnQ $ toExp expr2)) |] :>>> expr
+normToExp pats (E.Do statements) =
+    foldl1 (:>>>) expressions :>>> Arr [|fst|]
+        where (_,expressions) = mapAccumL normStmt pats statements -- need stack for nexted do!
+normToExp _ expr = help $ toExp expr
+
+normStmt :: [TH.Pat] -> E.Stmt -> ([TH.Pat],AExp)
+normStmt stack (E.Generator _ (toPat -> pattern) expr) = (pattern:trim stack,normCmd stack expr)
+normStmt stack (E.Qualifier expr) =                     (TH.WildP:trim stack,normCmd stack expr)
+normCmd :: [TH.Pat] -> E.Exp -> AExp
+normCmd stack (E.LeftArrApp (toExp -> expr) (returnQ . toExp -> expr2)) =
+    Arr [| (\ $(returnQ $ listTup stack) -> ($expr2,$(promoted stack) )) |] :>>> (First $ help expr)
+   --let expArr = expr >>= replaceArr
+   --[| $(C.arr [|(\ $(stackTup stack) -> ($expr2, $(promoted stack) )) |]) >>> $(TH.dyn "first") $expArr  |]
+normCmd _ _ = error "not imlemented, TODO"
+
+listTup [s] = TupP [s]
+listTup (s:ss) = TupP [s,TupP ss]
+listTup _ = error "empty stack"
+
+h = transformM arg
+    where arg (TH.AppE (TH.VarE (Name (OccName "arr") NameS)) b) = [| Arr b |]
+          arg x = returnQ x
+help (TH.AppE (TH.VarE (Name (OccName "arr") NameS)) b) = Arr $ returnQ b
+help (TH.VarE (Name (OccName "returnA") NameS)) = Arr [| id |]
+help x = error $ show x
+
+{-
+normStmt stack (E.LetStmt (E.BDecls [decls@(E.PatBind _ p _ _ _)])) = (toPat p:(trim stack),expression)
+    where process binds@(E.PatBind l pat mtype rhs bs) = TH.LetE (toDecs binds) $ TupE
+                                                [(promote $ toPat pat),(TupE $ map promote $ trim stack)]
+          expression = [| $(C.arr [| \ $(stackTup $ stack) -> $(returnQ $ process decls)  |] ) |]
+normStmt stack (E.LetStmt (E.BDecls d@((decls@(E.PatBind _ p _ _ _)):ds) )) = (newStack,newExpression)
+    where
+          expression = [| $(newExpression) |]
+          (newStack,exps) = mapAccumL stmtToE stack (map (E.LetStmt . E.BDecls . return) d)
+          newExpression = [| $(foldl1 next exps) |]
+---}
 
 aToExp :: [TH.Pat] -> E.Exp -> TH.ExpQ
 aToExp pats (E.Proc _ (toPat -> pattern) expr) = aToExp (pattern:pats) expr

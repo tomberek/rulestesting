@@ -9,7 +9,7 @@ import Parser
 import Control.CCA
 
 h :: ArrowInit a => a Int Int
-h = [arrow|proc n -> arr (+1) -< n+2 |]
+h = [arrowExp|proc n -> arr (+1) -< n+2 |]
 
 f :: ArrowInit a => a Int Int
 f = [arrow|
@@ -21,13 +21,19 @@ f = [arrow|
         returnA -< d+1
     |]
 e :: ArrowInit a => a Int Int
-e = [arrow|
+e = [arrowExp|
     proc n -> do
         returnA -< 10*n
         returnA -< 20*n
     |]
+
+
+(_,nonLoop) = [arrowExpOpt|
+    proc n -> arr id -< n+2
+    |]
+
 --d :: ArrowInit a => a Int Int
-d = [| [arrow|
+d = [| [arrowExp|
         proc n -> do
         Just a <- arr (\x -> Just x) -< n
         returnA -< n
