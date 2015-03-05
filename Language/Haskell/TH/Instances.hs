@@ -7,8 +7,7 @@ import GHC.Prim
 import Language.Haskell.TH.Syntax
 
 instance Lift a => Lift (Q a) where
-  lift x = x >>= \x -> [| return x |] 
-{-
+  lift x = x >>= \x -> [| return x |]
 instance Lift Exp where
   lift (VarE name) = [|VarE name|]
   lift (ConE name) = [|ConE name|]

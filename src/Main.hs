@@ -28,26 +28,27 @@ nth' n (i, f) = aux n i
       where (x, i') = f ((), i)
 runIt x = nth' 0
 
---optimized :: Int -> Int
---(a,optimized) = $(normOpt h)
+a :: Int -> Int
+(_,a) = [arrowExpOpt|
+    proc n -> do
+        b <- arr (+1) -< n +1
+        let c = b + 2* n
+        returnA -< c + 4
+        |]
 
-out :: ASyn Int Int
-out = $(norm h)
-
-boring :: ASyn Int Int
-boring = h
---}
 main :: IO ()
 main = do
     --(runQ $ unTypeQ g) >>= print
+    print $ a 2
     runQ [arrowExp|
         proc n -> do
-        Just a  <- arr (+1) >>> arr (\x -> Just x) -< n
-        let c = a+a
-            d = 0
-        b <- arr (*10) -< a +5
+        b <- arr (*10) -<  d+5
         returnA -< n+1
             |]
+    {-
+          rec let c = n+d
+              d <- init 1 -< c
+    -- -}
     print "hi"
 
 draw x = putStrLn $ intercalate "\n\n" $ map show x

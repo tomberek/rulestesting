@@ -68,6 +68,30 @@ normStmt stack (E.LetStmt (E.BDecls d@((decls@(E.PatBind _ p _ _ _)):ds) )) = (n
     where
           (newStack,exps) = mapAccumL normStmt stack (map (E.LetStmt . E.BDecls . return) d)
           newExpression = foldl1 (:>>>) exps
+normStmt s@(returnQ . TupP -> stack) (E.RecStmt statements) = (newStack,exps)
+    where
+        exps = Loop $ Arr [| (\ ($stack,$(returnQ $ TupP collectedPats)) 
+                             -> ($(returnQ collectedExps),$(returnQ $ TupE $ map promote $ collectedPats ++ s) )) |] :>>> arrows :>>> Arr [| \x -> (x,x) |]
+        newStack = collectedPats ++ s
+        (map toPat -> collectedPats,toExp . h . rend -> collectedExps) = unzip $ map collectRecData statements
+        arrows = foldl1 (*:*) $ map collectArrows statements
+x *:* y = First x :>>> Arr [| \(a,b)->(b,a) |] :>>> First y :>>> Arr [| \(a,b)->(b,a) |]
+
+rend [s] = tuple [s]
+rend (s:ss) = tuple [s,rend ss]
+rend [] = tuple []
+
+collectRecData (E.Generator _ pat (E.LeftArrApp exp1 expr)) = (pat,expr)
+collectRecData (E.Qualifier (E.LeftArrApp exp1 expr)) = (PWildCard,expr)
+collectRecData (E.LetStmt (E.BDecls decls)) = (\(a,b) -> (pTuple a,tuple b)) $ unzip $ map (\(E.PatBind _ p _ (UnGuardedRhs rhs) _) -> (p,rhs)) decls
+collectRecData (E.RecStmt stmts) = (\(a,b) -> (pTuple a,tuple b)) $ unzip $ map collectRecData stmts
+collectRecData x = error $ "Error in collection of expressions: " ++ show x
+
+collectArrows (E.Generator _ _ (E.LeftArrApp exp1 _)) = Arr $ returnQ $ toExp $ exp1
+collectArrows (E.Qualifier (E.LeftArrApp exp1 _)) = Arr $ returnQ $ toExp $ exp1
+collectArrows (E.LetStmt (E.BDecls decls)) = Arr [| id |] -- capture for arr'?
+--collectArrows (E.RecStmt stmts) = _ $ map collectArrows stmts
+collectArrows x = error $ "Error in collections of arrows: " ++ show x
 
 promoted stack = returnQ $ TupE $ map promote $ trim stack
 
@@ -86,6 +110,10 @@ h = rewrite arg
         arg (E.App (E.Var (E.UnQual (E.Symbol "arr"))) b) = Just $ arrFun b
         arg (E.App (E.Var (E.Qual _ (E.Symbol "arr"))) b) = Just $ arrFun b
         arg (E.App (E.Var (E.Qual _ (E.Ident "arr"))) b) = Just $ arrFun b
+        arg (E.App (E.Var (E.UnQual (E.Ident "init"))) b) = Just $ app (var (name "Init")) b
+        arg (E.App (E.Var (E.UnQual (E.Symbol "init"))) b) = Just $ app (var (name "Init")) b
+        arg (E.App (E.Var (E.Qual _ (E.Symbol "init"))) b) = Just $ app (var (name "Init")) b
+        arg (E.App (E.Var (E.Qual _ (E.Ident "init"))) b) = Just $ app (var (name "Init")) b
         arg (E.Var (E.UnQual (E.Ident "returnA"))) = Just $ arrFun (var $ name "id")
         arg (E.Var (E.UnQual (E.Symbol "returnA"))) = Just $ arrFun (var $ name "id")
         arg (E.Var (E.Qual _ (E.Ident "returnA"))) = Just $ arrFun (var $ name "id")
