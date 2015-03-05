@@ -15,10 +15,10 @@ f :: ArrowInit a => a Int Int
 f = [arrowExp|
     proc n -> do
         Just a  <- arr (+1) >>> arr (\x -> Just x) -< n
-        let c = a+a
+        let c = n+n
             d = 0
-        b <- arr (*10) -< a +5
-        returnA -< b+1
+        b <- arr (*10) -< n +5
+        returnA -< n+1
     |]
 e :: ArrowInit a => a Int Int
 e = [arrowExp|

@@ -1,11 +1,11 @@
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE ViewPatterns #-}
 -- Thomas Bereknyei 2015
-module Parser where
+module Parser (arrowExp,arrowExpOpt,norm,normOpt) where
 import Language.Haskell.Exts
 import qualified Language.Haskell.Exts.Annotated.Syntax as S
 import qualified Language.Haskell.Exts.Syntax as E
-import Language.Haskell.Exts.Annotated.Simplify
 import Language.Haskell.Meta
 import Language.Haskell.TH.Quote
 import Language.Haskell.TH.Syntax
@@ -14,7 +14,7 @@ import qualified Language.Haskell.TH.Lib as TH
 import Language.Haskell.TH
 import Data.List (mapAccumL)
 import Debug.Trace
-import Control.Arrow(arr,(>>>),first)
+import Control.CCA
 import qualified Control.CCA as C
 import Control.CCA.CCNF
 import Data.Generics.Uniplate.Data
@@ -24,25 +24,10 @@ arrowParseMode = defaultParseMode{extensions=[EnableExtension Arrows]}
 parseArrow :: String -> ParseResult (E.Exp )
 parseArrow = parseExpWithMode arrowParseMode
 
-l = norm
-arrow :: QuasiQuoter
-arrow = QuasiQuoter {
-    quoteExp = \input -> case parseArrow input of
-        ParseOk result -> aToExp [] $ result
-        --ParseOk result -> returnQ $ toExp $ sExp $ arrowToExp [] result
-        ParseFailed l err -> error $ show l ++ show err
-  , quotePat = error "cannot be patterns."
-  , quoteDec = error "cannot be declarations."
-  , quoteType = error "cannot be types."
-  }
-
-getExp (Arr e) = [| Arr $e |]
-getExp (First e) = [| first $(getExp e) |]
-getExp (a :>>> b) = [| $(getExp a) >>> $(getExp b) |]
 arrowExp :: QuasiQuoter
 arrowExp = QuasiQuoter {
     quoteExp = \input -> case parseArrow input of
-        ParseOk result -> norm $ AExp $ normToExp [] $ result
+        ParseOk result -> norm $ AExp $ normToExp [] $ h result
         ParseFailed l err -> error $ show l ++ show err
   , quotePat = error "cannot be patterns."
   , quoteDec = error "cannot be declarations."
@@ -51,46 +36,87 @@ arrowExp = QuasiQuoter {
 arrowExpOpt :: QuasiQuoter
 arrowExpOpt = QuasiQuoter {
     quoteExp = \input -> case parseArrow input of
-        ParseOk result -> normOpt $ AExp $ normToExp [] $ result
+        ParseOk result -> normOpt $ AExp $ normToExp [] $ h result
         ParseFailed l err -> error $ show l ++ show err
   , quotePat = error "cannot be patterns."
   , quoteDec = error "cannot be declarations."
   , quoteType = error "cannot be types."
   }
-nextExp x y = [| $x :>>> $y |]
+
 normToExp :: [TH.Pat] -> E.Exp -> AExp
-normToExp pats (E.Proc _ (toPat -> pattern) expr) = normToExp (pattern:pats) expr
-normToExp pats@(returnQ . TupP -> stack) (E.LeftArrApp (normToExp pats -> expr) expr2) =
-    Arr [| (\ $stack -> $(returnQ $ toExp expr2)) |] :>>> expr
+normToExp pats (E.Proc _ (toPat -> pattern) (h -> expr)) = normToExp (pattern:pats) expr
+normToExp pats@(returnQ . TupP -> stack) (E.LeftArrApp (normToExp pats . h -> expr) (returnQ . toExp . h -> expr2)) =
+    Arr [| (\ $stack -> $expr2) |] :>>> expr
 normToExp pats (E.Do statements) =
     foldl1 (:>>>) expressions :>>> Arr [|fst|]
         where (_,expressions) = mapAccumL normStmt pats statements -- need stack for nexted do!
-normToExp _ expr = _ $ h expr
+--normToExp _ (E.App (E.Var (E.UnQual (E.Ident "arr"))) b) = Arr $ returnQ $ toExp $ h b
+normToExp _ (E.App (E.Var (E.UnQual (E.Ident "Arr"))) b) = Arr $ returnQ $ toExp $ h b
+--normToExp _ (E.UInfixE) = undefined
+normToExp _ (E.Var (E.UnQual (E.Ident "returnA"))) = Arr [| id |] -- $ TH.dyn "id"
+normToExp s (E.InfixApp (normToExp s . h -> leftExp) (E.QVarOp (E.UnQual (E.Symbol ">>>"))) (normToExp s . h -> rightExp) ) = leftExp :>>> rightExp -- $ TH.dyn "id"
+normToExp _ expr = error $ "normToExp pattern fail  " ++ show expr
 
 normStmt :: [TH.Pat] -> E.Stmt -> ([TH.Pat],AExp)
-normStmt stack (E.Generator _ (toPat -> pattern) expr) = (pattern:trim stack,normCmd stack expr)
-normStmt stack (E.Qualifier expr) =                     (TH.WildP:trim stack,normCmd stack expr)
+normStmt stack (E.Generator _ (toPat -> pattern) (h -> expr)) = (pattern:trim stack,normCmd stack expr)
+normStmt stack (E.Qualifier (h -> expr)) =                     (TH.WildP:trim stack,normCmd stack expr)
+normStmt stack (E.LetStmt (E.BDecls [decls@(E.PatBind _ p _ _ _)])) = (toPat p:(trim stack),expression)
+   where process binds@(E.PatBind l pat mtype rhs bs) = TH.LetE (toDecs binds) $ TupE
+                                               [(promote $ toPat pat),(TupE $ map promote $ trim stack)]
+         expression = Arr [| \ $(returnQ $ listTup stack) -> $(returnQ $ process decls) |]
+normStmt stack (E.LetStmt (E.BDecls d@((decls@(E.PatBind _ p _ _ _)):ds) )) = (newStack,newExpression)
+    where
+          (newStack,exps) = mapAccumL normStmt stack (map (E.LetStmt . E.BDecls . return) d)
+          newExpression = foldl1 (:>>>) exps
+
+promoted stack = returnQ $ TupE $ map promote $ trim stack
+
 normCmd :: [TH.Pat] -> E.Exp -> AExp
-normCmd stack (E.LeftArrApp (toExp -> expr) (returnQ . toExp -> expr2)) =
-    Arr [| (\ $(returnQ $ listTup stack) -> ($expr2,$(promoted stack) )) |] :>>> (First $ help expr)
-   --let expArr = expr >>= replaceArr
-   --[| $(C.arr [|(\ $(stackTup stack) -> ($expr2, $(promoted stack) )) |]) >>> $(TH.dyn "first") $expArr  |]
+normCmd stack (E.LeftArrApp (normToExp stack . h -> expr) (returnQ . toExp . h -> expr2)) =
+    Arr [| (\ $(returnQ $ listTup stack) -> ($expr2,$(promoted stack) )) |] :>>> (First expr)
 normCmd _ _ = error "not imlemented, TODO"
 
 listTup [s] = TupP [s]
 listTup (s:ss) = TupP [s,TupP ss]
 listTup _ = error "empty stack"
-
-h = transform arg
+arrFun = app (var (name "Arr"))
+h = rewrite arg
     where
-        arg (E.App (E.Var (E.UnQual (E.Ident "arr"))) b) = app (function "Arr") b
-        arg (E.Var (E.UnQual (E.Ident "returnA"))) = app (function "Arr") (var $ name "id")
-        arg x = error "more transforms"
-help (TH.AppE (TH.VarE (Name (OccName "arr") NameS)) b) = Arr $ returnQ b
-help (TH.VarE (Name (OccName "returnA") NameS)) = Arr [| id |]
-help x = error $ show x
+        arg (E.App (E.Var (E.UnQual (E.Ident "arr"))) b) = Just $ arrFun b
+        arg (E.App (E.Var (E.UnQual (E.Symbol "arr"))) b) = Just $ arrFun b
+        arg (E.App (E.Var (E.Qual _ (E.Symbol "arr"))) b) = Just $ arrFun b
+        arg (E.App (E.Var (E.Qual _ (E.Ident "arr"))) b) = Just $ arrFun b
+        arg (E.Var (E.UnQual (E.Ident "returnA"))) = Just $ arrFun (var $ name "id")
+        arg (E.Var (E.UnQual (E.Symbol "returnA"))) = Just $ arrFun (var $ name "id")
+        arg (E.Var (E.Qual _ (E.Ident "returnA"))) = Just $ arrFun (var $ name "id")
+        arg (E.Var (E.Qual _ (E.Symbol "returnA"))) = Just $ arrFun (var $ name "id")
+        arg x = Nothing
 
+trim :: [TH.Pat] -> [TH.Pat]
+trim (WildP:p) = p
+trim ((ConP _ p) :ps) = ((TupP p) : ps)
+trim p = p
+
+promote :: TH.Pat -> TH.Exp
+promote (TH.ConP _ pats) = TupE $ map promote pats
+promote (TH.VarP n) = VarE n
+promote (TH.LitP n) = LitE n
+promote (TH.TupP pats) = TupE $ map promote pats
+promote (TH.ParensP pat) = ParensE $ promote pat
+promote (TH.ListP pats) = ListE $ map promote pats
+promote x = error $ "pattern promotion TODO" ++ show x
 {-
+
+l = norm
+arrow :: QuasiQuoter
+arrow = QuasiQuoter {
+    quoteExp = \input -> case parseArrow input of
+        ParseOk result -> undefined -- aToExp [] $ result
+        ParseFailed l err -> error $ show l ++ show err
+  , quotePat = error "cannot be patterns."
+  , quoteDec = error "cannot be declarations."
+  , quoteType = error "cannot be types."
+  }
 normStmt stack (E.LetStmt (E.BDecls [decls@(E.PatBind _ p _ _ _)])) = (toPat p:(trim stack),expression)
     where process binds@(E.PatBind l pat mtype rhs bs) = TH.LetE (toDecs binds) $ TupE
                                                 [(promote $ toPat pat),(TupE $ map promote $ trim stack)]
@@ -101,7 +127,7 @@ normStmt stack (E.LetStmt (E.BDecls d@((decls@(E.PatBind _ p _ _ _)):ds) )) = (n
           (newStack,exps) = mapAccumL stmtToE stack (map (E.LetStmt . E.BDecls . return) d)
           newExpression = [| $(foldl1 next exps) |]
 ---}
-
+{-
 aToExp :: [TH.Pat] -> E.Exp -> TH.ExpQ
 aToExp pats (E.Proc _ (toPat -> pattern) expr) = aToExp (pattern:pats) expr
 aToExp pats@(returnQ . TupP -> stack) (E.LeftArrApp (aToExp pats -> expQ) (aToExp pats -> expr2)) = do
@@ -136,7 +162,6 @@ stmtToE _ _ = error "not implemented, TODO"
 
 next x y = TH.uInfixE x (TH.dyn ">>>") y
 
-promoted stack = returnQ $ TupE $ map promote $ trim stack
 stackTup stack = returnQ $ case stack of
                    [] -> error "empty stack"
                    [s] -> TupP [s]
@@ -149,21 +174,9 @@ cmdToE stack (E.LeftArrApp (aToExp stack -> expr) (aToExp stack -> expr2)) = do
 
 cmdToE _ _ = error "not imlemented, TODO"
 
-trim :: [TH.Pat] -> [TH.Pat]
-trim (WildP:p) = p
-trim ((ConP _ p) :ps) = ((TupP p) : ps)
-trim p = p
-viewP :: ToPat a => a -> TH.PatQ
-viewP = returnQ . toPat
 
-promote :: TH.Pat -> TH.Exp
-promote (TH.ConP _ pats) = TupE $ map promote pats
-promote (TH.VarP n) = VarE n
-promote (TH.LitP n) = LitE n
-promote (TH.TupP pats) = TupE $ map promote pats
-promote (TH.ParensP pat) = ParensE $ promote pat
-promote (TH.ListP pats) = ListE $ map promote pats
-promote x = error $ "pattern promotion TODO" ++ show x
+
+
 {-
 x >:> y = infixApp (ann x) x (op (ann y) $ name (ann y) ">>>") y
 x &:& y = infixApp (ann x) x (op (ann y) $ name (ann y) "&&&") y
@@ -242,4 +255,5 @@ replace :: Eq a =>
         -> [a] -- ^ Input list
         -> [a] -- ^ Output list
 replace x y = map (\z -> if z == x then y else z)
+--}
 --}
