@@ -6,6 +6,7 @@ module Parser (arrowExp,arrowExpOpt,norm,normOpt) where
 import Language.Haskell.Exts
 import qualified Language.Haskell.Exts.Annotated.Syntax as S
 import qualified Language.Haskell.Exts.Syntax as E
+import qualified Language.Haskell.Exts.Build as B
 import Language.Haskell.Meta
 import Language.Haskell.TH.Quote
 import Language.Haskell.TH.Syntax
@@ -14,8 +15,6 @@ import qualified Language.Haskell.TH.Lib as TH
 import Language.Haskell.TH
 import Data.List (mapAccumL)
 import Debug.Trace
-import Control.CCA
-import qualified Control.CCA as C
 import Control.CCA.CCNF
 import Data.Generics.Uniplate.Data
 
@@ -43,23 +42,23 @@ arrowExpOpt = arrowExp{
 
 normToExp :: [TH.Pat] -> E.Exp -> AExp
 normToExp pats (E.Proc _ (toPat -> pattern) (h -> expr)) = normToExp (pattern:pats) expr
-normToExp pats@(returnQ . TupP -> stack) (E.LeftArrApp (normToExp pats . h -> expr) (returnQ . toExp . h -> expr2)) =
+normToExp pats@(returnQ . TupP -> stack) (E.LeftArrApp (normToExp pats -> expr) (returnQ . toExp -> expr2)) =
     Arr [| (\ $stack -> $expr2) |] :>>> expr
 normToExp pats (E.Do statements) =
     foldl1 (:>>>) expressions :>>> Arr [|fst|]
         where (_,expressions) = mapAccumL normStmt pats statements -- need stack for nexted do!
---normToExp _ (E.App (E.Var (E.UnQual (E.Ident "arr"))) b) = Arr $ returnQ $ toExp $ h b
-normToExp _ (E.App (E.Var (E.UnQual (E.Ident "Arr"))) b) = Arr $ returnQ $ toExp $ h b
-normToExp _ (E.App (E.Var (E.UnQual (E.Ident "Init"))) b) = Init $ returnQ $ toExp $ h b
---normToExp _ (E.UInfixE) = undefined
-normToExp _ (E.Var (E.UnQual (E.Ident "returnA"))) = Arr [| id |] -- $ TH.dyn "id"
-normToExp s (E.InfixApp (normToExp s . h -> leftExp) (E.QVarOp (E.UnQual (E.Symbol ">>>"))) (normToExp s . h -> rightExp) ) = leftExp :>>> rightExp -- $ TH.dyn "id"
+normToExp _ (E.App (E.Var (E.UnQual (E.Ident "Arr"))) b) = Arr $ returnQ $ toExp  b
+normToExp _ (E.App (E.Var (E.UnQual (E.Ident "Init"))) b) = Init $ returnQ $ toExp b
+normToExp _ (E.Var (E.UnQual (E.Ident "returnA"))) = Arr [| id |]
+normToExp s (E.InfixApp (normToExp s -> leftExp) (E.QVarOp (E.UnQual (E.Symbol ">>>"))) (normToExp s -> rightExp) ) = leftExp :>>> rightExp
+normToExp s (E.InfixApp (normToExp s -> leftExp) (E.QVarOp (E.UnQual (E.Symbol "<<<"))) (normToExp s -> rightExp) ) = rightExp :>>> leftExp
+normToExp s (E.InfixApp (normToExp s -> leftExp) (E.QVarOp (E.UnQual (E.Symbol "***"))) (normToExp s -> rightExp) ) = rightExp :>>> leftExp
 normToExp _ expr = error $ "normToExp pattern fail  " ++ show expr
 
 promoted stack = returnQ $ TupE $ map promote $ trim stack
 
 normCmd :: [TH.Pat] -> E.Exp -> AExp
-normCmd stack (E.LeftArrApp (normToExp stack . h -> expr) (returnQ . toExp . h -> expr2)) =
+normCmd stack (E.LeftArrApp (normToExp stack -> expr) (returnQ . toExp -> expr2)) =
     Arr [| (\ $(returnQ $ listTup stack) -> ($expr2,$(promoted stack) )) |] :>>> (First expr)
 normCmd _ _ = error "not imlemented, TODO"
 
@@ -86,7 +85,7 @@ normStmt s@(returnQ . TupP -> stack) (E.RecStmt statements) = (trim $ collectedP
 
         trimmedStack = trim s
         newPatterns = returnQ $ TupP $ collectedPats ++ s
-        (map toPat . concat -> collectedPats,toExp . h . tuplize tuple . concat -> collectedExps) = unzip $ map collectRecData statements
+        (map toPat . concat -> collectedPats,toExp . tuplize tuple . concat -> collectedExps) = unzip $ map collectRecData statements
         arrows = foldl1 (*:*) $ map collectArrows statements
 x *:* y = First x :>>> Arr [| \(a,b)->(b,a) |] :>>> First y :>>> Arr [| \(a,b)->(b,a) |]
 tuplize t [s] = s

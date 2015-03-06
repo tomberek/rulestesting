@@ -10,9 +10,11 @@ environment: ghc-7.8-stable-14.09
 auto-hidden: []
 cabal-file: project.cabal
 version: 1
-extra-packages: ''
+extra-packages: ! 'Hackage: th-orphans 0.9.1'
 ghc-args:
 - -fdefer-type-errors
 - -fenable-rewrite-rules
 - -fno-max-relevant-binds
-excluded-modules: []
+excluded-modules:
+- Control/CCA.hs
+- Language/Haskell/TH/Instances1.hs

@@ -3,10 +3,9 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE Arrows #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-module Examples
-     where
+module Examples where
 import Parser
-import Control.CCA
+import Control.Arrow.Init
 
 h :: ArrowInit a => a Int Int
 h = [arrowExp|proc n -> arr (+1) -< n+2 |]

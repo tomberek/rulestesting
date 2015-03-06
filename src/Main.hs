@@ -11,8 +11,7 @@ import Data.List (intercalate)
 import Examples
 import Parser
 import Control.CCA.CCNF
-import Control.CCA.Types
---import Control.CCA
+import Control.Arrow.Init
 import Debug.Trace
 import Control.Arrow
 import Language.Haskell.TH (runQ)
@@ -44,21 +43,20 @@ complexA :: Int -> (Int,Int)
     proc n -> do
         a <- arr (+5) -< n - (4::Int)
         c <- arr (*10) -< a +n
-        d <- arr (+1) -< a + c
+        d <- arr (+1) >>> arr (+43) -< a + c
         returnA -< (c,a)
         |]
 ---}
-
 main :: IO ()
 main = do
     --(runQ $ unTypeQ g) >>= print
     print $ nth' 2 z
     print $ complexA 2
-    {-
+    {-}
     runQ [arrowExp|
         proc () -> do
         rec b <- init (1::Int) -< a+1
-            a <- arr (+4) -< b
+            a <- arr (+4) <<< arr ((-) 2) -< b
         returnA -< b
             |]
     --}
