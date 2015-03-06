@@ -1,4 +1,5 @@
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE Arrows #-}
 module Main where
 
 import Control.Category
@@ -39,6 +40,12 @@ complexA :: Int -> (Int,Int)
         d <- arr (+1) >>> arr (+43) -< a + c
         returnA -< (c,a)
         |]
+complexB :: Int -> (Int,Int)
+complexB = proc n -> do
+    a <- arr (+5) -< n - (4::Int)
+    c <- arr (*10) -< a +n
+    d <- arr (+1) >>> arr (+43) -< a + c
+    returnA -< (c,a)
 ---}
 main :: IO ()
 main = do
