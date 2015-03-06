@@ -2,7 +2,7 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE ViewPatterns #-}
 -- Thomas Bereknyei 2015
-module Control.Arrow.Init.Optimize.TH (arrow,arrowOpt,norm,normOpt,ArrowInit(..)) where
+module Control.Arrow.Init.TH (arrow,arrowOpt,norm,normOpt,ArrowInit(..)) where
 import Language.Haskell.Exts
 import qualified Language.Haskell.Exts.Syntax as E
 import Language.Haskell.Meta

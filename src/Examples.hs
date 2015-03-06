@@ -1,6 +1,6 @@
 {-# LANGUAGE QuasiQuotes #-}
 module Examples where
-import Control.Arrow.Init.Optimize.TH
+import Control.Arrow.Init.TH
 
 example0 :: ArrowInit a => a Int Int
 example0 = [arrow|proc n -> arr (+1) -< n+2 |]

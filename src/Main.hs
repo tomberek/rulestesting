@@ -4,7 +4,7 @@ module Main where
 import Control.Category
 import Prelude hiding (id,(.))
 import Control.Arrow
-import Control.Arrow.Init.Optimize.TH
+import Control.Arrow.Init.TH
 import Language.Haskell.TH (runQ)
 import Examples
 
