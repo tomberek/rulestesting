@@ -154,7 +154,7 @@ Arrow laws:
 > normalize (First (Arr f)) = Arr (f `crossE` idE)
 > normalize (Arr f :>>> LoopD i g) = LoopD i (g `o` (f `crossE` idE))
 > normalize (LoopD i f :>>> Arr g) = LoopD i ((g `crossE` idE) `o` f)
-> normalize (LoopD i f :>>> LoopD j g) = LoopD (tupE [i,j]) 
+> normalize (LoopD i f :>>> LoopD j g) = LoopD (tupE [i,j])
 >   (assocE `o` juggleE `o` (g `crossE` idE) `o` juggleE `o` (f `crossE` idE) `o` assocE')
 > normalize (Loop (LoopD i f)) = LoopD i (traceE (juggleE `o` f `o` juggleE))
 > normalize (First (LoopD i f)) = LoopD i (juggleE `o` (f `crossE` idE) `o` juggleE)
@@ -165,9 +165,9 @@ Choice:
 > normalize (Lft (Arr f)) = Arr (lftE f)
 > normalize (Lft (LoopD i f)) = LoopD i (untagE `o` lftE f `o` tagE)
 
-All the other cases are unchanged. 
+All the other cases are unchanged.
 
-> normalize e = e 
+> normalize e = e
 
 To Let-Expression
 =================

@@ -14,10 +14,10 @@ h = [arrowExp|proc n -> arr (+1) -< n+2 |]
 f :: ArrowInit a => a Int Int
 f = [arrowExp|
     proc n -> do
-        Just a  <- arr (+1) >>> arr (\x -> Just x) -< n
-        let c = n+n
-            d = 0
-        b <- arr (*10) -< n +5
+        Just a  <- arr (\x -> Just x) -< n
+        rec     let c = n+n
+                    d = 0
+                e <- arr id -< c + d
         returnA -< n+1
     |]
 e :: ArrowInit a => a Int Int
