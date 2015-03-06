@@ -1,45 +1,38 @@
-{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE TemplateHaskell #-}
 module Main where
 
 import Control.Category
 import Prelude hiding (id,(.))
-
-import Data.List (intercalate)
-import Examples
-import Parser
-import Control.CCA.CCNF
-import Control.Arrow.Init
-import Debug.Trace
 import Control.Arrow
+import Control.Arrow.Init.Optimize.TH
 import Language.Haskell.TH (runQ)
-
---g =  [||  [arrow| proc n -> arr (+1) -< n |] :: Int -> Int ||]
+import Examples
 
 runCCNF :: e -> ((b, e) -> (c, e)) -> [b] -> [c]
 runCCNF i f = g i
-        where g i (x:xs) = let (y, i') = f (x, i)
-                            in y : g i' xs
+        where
+            g _ [] = []
+            g j (x:xs) = let (y, j') = f (x, j)
+                            in y : g j' xs
 
 nth' :: Int -> (b, ((), b) -> (a, b)) -> a
 nth' n (i, f) = aux n i
   where
-    aux n i = x `seq` if n == 0 then x else aux (n-1) i'
-      where (x, i') = f ((), i)
-runIt x = nth' 0
+    aux m j = x `seq` if m == 0 then x else aux (m-1) j'
+      where (x, j') = f ((), j)
 
---z :: () -> Int
---z :: SF () Int
-z = [arrowExpOpt|
+runIt :: t -> (b, ((), b) -> (a, b)) -> a
+runIt _ = nth' 0
+
+exampleOpt :: (Int, ((), Int) -> (Int, Int))
+exampleOpt = [arrowOpt|
     proc () -> do
         rec a <- init (1::Int) -< b *10
             b <- arr (+4) -< a
         returnA -< a
         |]
 complexA :: Int -> (Int,Int)
-(_,complexA) = [arrowExpOpt|
+(_,complexA) = [arrowOpt|
     proc n -> do
         a <- arr (+5) -< n - (4::Int)
         c <- arr (*10) -< a +n
@@ -49,44 +42,44 @@ complexA :: Int -> (Int,Int)
 ---}
 main :: IO ()
 main = do
-    --(runQ $ unTypeQ g) >>= print
-    print $ nth' 2 z
+    print $ nth' 2 exampleOpt
     print $ complexA 2
     {-}
-    runQ [arrowExp|
-        proc () -> do
-        rec b <- init (1::Int) -< a+1
-            a <- arr (+4) <<< arr ((-) 2) -< b
-        returnA -< b
+    runQ [arrow|
+        proc n -> do
+        Just a  <- arr (\x -> Just x) -< n
+        rec
+                e <- arr id -< a + n
+                f <- arr id -< a - n
+                g <- arr id -< a * n
+                _ <- arr id -< e
+        returnA -< e+1
             |]
     --}
-    print "hii"
-    print "hi"
+    print "Optimizer complete"
 
-draw x = putStrLn $ intercalate "\n\n" $ map show x
 newtype SF a b = SF { unSF :: a -> (b, SF a b) }
 instance Category SF where
     id = SF (\a -> (a,id))
-    (.) = flip (>:>)
-f >:> g = SF (h f g)
+    b . a =  SF (h a b)
         where h f g x = let (y, f') = unSF f x
                             (z, g') = unSF g y
                           in (z, SF (h f' g'))
 instance Arrow SF where
     arr f = SF h
         where h x = (f x, SF h)
-    first f = SF (h f)
+    first a = SF (h a)
         where h f (x, z) = let (y, f') = unSF f x
                                 in ((y, z), SF (h f'))
 instance ArrowLoop SF where
-    loop f = SF (h f)
+    loop a = SF (h a)
         where h f x = let ((y, z), f') = unSF f (x, z)
                             in (y, SF (h f'))
 instance ArrowInit SF where
-    init i = SF (h i)
+    init a = SF (h a)
         where h i x = (i, SF (h x))
 
 runSF :: SF a b -> [a] -> [b]
-runSF f = g f
-    where g f (x:xs) = let (y, f') = unSF f x
-                           in y: g f' xs
+runSF f (x:xs) = let (y, f') = unSF f x
+                           in y: runSF f' xs
+runSF _ [] = []

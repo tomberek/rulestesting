@@ -5,8 +5,8 @@ module Control.Arrow.Init where
 import Control.Category
 
 import Control.Arrow
-import Language.Haskell.TH
-import Language.Haskell.TH.Syntax
+
+
 import Prelude hiding (init)
 
 class (Arrow a, ArrowLoop a) => ArrowInit a where

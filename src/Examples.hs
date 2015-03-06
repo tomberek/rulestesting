@@ -1,45 +1,41 @@
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE Arrows #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 module Examples where
-import Parser
-import Control.Arrow.Init
+import Control.Arrow.Init.Optimize.TH
 
-h :: ArrowInit a => a Int Int
-h = [arrowExp|proc n -> arr (+1) -< n+2 |]
+example0 :: ArrowInit a => a Int Int
+example0 = [arrow|proc n -> arr (+1) -< n+2 |]
 
-f :: ArrowInit a => a Int Int
-f = [arrowExp|
+example1 :: ArrowInit a => a Int Int
+example1 = [arrow|
     proc n -> do
-        Just a  <- arr (\x -> Just x) -< n
-        rec     let c = n+n
-                    d = 0
-                e <- arr id -< c + d
-        returnA -< n+1
+        Just a  <- arr (\x -> Just x) -< (n::Int)
+        rec
+                e <- arr id -< a + (1::Int)
+                f <- arr id -< a - n
+                g <- arr id -< "aerfa"
+        returnA -< length g
     |]
-e :: ArrowInit a => a Int Int
-e = [arrowExp|
+example2 :: ArrowInit a => a Int Int
+example2 = [arrow|
     proc n -> do
         returnA -< 10*n
         returnA -< 20*n
     |]
 
-nonLoop :: Int -> Int
-(_,nonLoop) = [arrowExpOpt|
+example3 :: Int -> Int
+(_,example3) = [arrowOpt|
     proc n -> arr id -< n+2
     |]
 
---d :: ArrowInit a => a Int Int
-d = [| [arrowExp|
+example4 :: ArrowInit a => a Int Int
+example4 = [arrow|
         proc n -> do
         Just a <- arr (\x -> Just x) -< n
         returnA -< n
         _ <- arr (*2) -< n+1
         d <- arr (*2) -< a*1
         returnA -< n
-            |] |]
+            |]
 
 {-
 i = [arrow|
