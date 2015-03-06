@@ -91,8 +91,6 @@ normStmt s@(returnQ . TupP -> stack) (E.RecStmt statements) = (trim $ collectedP
 x *:* y = First x :>>> Arr [| \(a,b)->(b,a) |] :>>> First y :>>> Arr [| \(a,b)->(b,a) |]
 tuplize t [s] = s
 tuplize t (s:ss) = t [s, tuplize t ss]
---temp :: Arrow a => a b c -> a d
---temp f g = First _
 
 rend t [s] = t [s]
 rend t (s:ss) = t [s,rend t ss]
@@ -104,14 +102,13 @@ collectRecData (E.LetStmt (E.BDecls decls)) = (\(a,b) -> (a,b)) $ unzip $ map (\
 collectRecData (E.RecStmt stmts) = (\(a,b) -> (concat a,concat b)) $ unzip $ map collectRecData stmts
 collectRecData x = error $ "Error in collection of expressions: " ++ show x
 
-collectArrows (E.Generator _ _ (E.LeftArrApp exp1 _)) = normToExp undefined exp1 -- Arr $ returnQ $ toExp $ exp1
+collectArrows (E.Generator _ _ (E.LeftArrApp exp1 _)) = normToExp undefined exp1 -- nested statments? UNDEFINED
 collectArrows (E.Qualifier (E.LeftArrApp exp1 _)) = normToExp undefined exp1
 collectArrows (E.LetStmt (E.BDecls decls)) = Arr [| id |] -- capture for arr'?
---collectArrows (E.RecStmt stmts) = _ $ map collectArrows stmts
+--collectArrows (E.RecStmt stmts) = _ $ map collectArrows stmts  nexted rec statements?
 collectArrows x = error $ "Error in collections of arrows: " ++ show x
 
 listTup [s] = TupP [s]
---listTup (s:ss) = TupP (s:ss)
 listTup (s:ss) = TupP [s,TupP ss]
 listTup _ = error "empty stack"
 arrFun = app (var (name "Arr"))
@@ -132,7 +129,6 @@ h = rewrite arg
         arg x = Nothing
 
 trim :: [TH.Pat] -> [TH.Pat]
---trim (WildP:p) = p
 trim ((ConP _ p) :ps) = (p ++ ps)
 trim (p:ps) = p:trim ps
 trim p = p
@@ -147,155 +143,5 @@ promote (TH.ParensP pat) = ParensE $ promote pat
 promote (TH.ListP pats) = ListE $ map promote pats
 promote (TH.WildP) = TupE []
 promote x = error $ "pattern promotion TODO" ++ show x
-{-
-
-l = norm
-arrow :: QuasiQuoter
-arrow = QuasiQuoter {
-    quoteExp = \input -> case parseArrow input of
-        ParseOk result -> undefined -- aToExp [] $ result
-        ParseFailed l err -> error $ show l ++ show err
-  , quotePat = error "cannot be patterns."
-  , quoteDec = error "cannot be declarations."
-  , quoteType = error "cannot be types."
-  }
-normStmt stack (E.LetStmt (E.BDecls [decls@(E.PatBind _ p _ _ _)])) = (toPat p:(trim stack),expression)
-    where process binds@(E.PatBind l pat mtype rhs bs) = TH.LetE (toDecs binds) $ TupE
-                                                [(promote $ toPat pat),(TupE $ map promote $ trim stack)]
-          expression = [| $(C.arr [| \ $(stackTup $ stack) -> $(returnQ $ process decls)  |] ) |]
-normStmt stack (E.LetStmt (E.BDecls d@((decls@(E.PatBind _ p _ _ _)):ds) )) = (newStack,newExpression)
-    where
-          expression = [| $(newExpression) |]
-          (newStack,exps) = mapAccumL stmtToE stack (map (E.LetStmt . E.BDecls . return) d)
-          newExpression = [| $(foldl1 next exps) |]
----}
-{-
-aToExp :: [TH.Pat] -> E.Exp -> TH.ExpQ
-aToExp pats (E.Proc _ (toPat -> pattern) expr) = aToExp (pattern:pats) expr
-aToExp pats@(returnQ . TupP -> stack) (E.LeftArrApp (aToExp pats -> expQ) (aToExp pats -> expr2)) = do
-    let expr = expQ >>= replaceArr
-    [| $(C.arr [|(\ $stack -> $expr2)|]) >>> $expr |]
-aToExp pats (E.Do statements) =
-    [| $(foldl1 next expressions) >>> $(C.arr [|fst|]) |]
-        where (_,expressions) = mapAccumL stmtToE pats statements -- need stack for nexted do!
-aToExp _ expr = returnQ $ toExp expr
-
-replaceArr :: TH.Exp -> Q TH.Exp
-replaceArr = transformM help
-    where
-        help (TH.AppE (TH.VarE (Name (OccName "arr") NameS)) b) = C.arr (returnQ b)
-        help (TH.VarE (Name (OccName "returnA") NameS)) = C.arr [| id |]
-        help x = returnQ x
-
-stmtToE :: [TH.Pat] -> E.Stmt -> ([TH.Pat],TH.ExpQ)
-stmtToE stack (E.Generator _ (toPat -> pattern) expr) = (pattern:trim stack,cmdToE stack expr)
-stmtToE stack (E.Qualifier expr) =                     (TH.WildP:trim stack,cmdToE stack expr)
-stmtToE stack (E.LetStmt (E.BDecls [decls@(E.PatBind _ p _ _ _)])) = (toPat p:(trim stack),expression)
-    where process binds@(E.PatBind l pat mtype rhs bs) = TH.LetE (toDecs binds) $ TupE
-                                                [(promote $ toPat pat),(TupE $ map promote $ trim stack)]
-          expression = [| $(C.arr [| \ $(stackTup $ stack) -> $(returnQ $ process decls)  |] ) |]
-stmtToE stack (E.LetStmt (E.BDecls d@((decls@(E.PatBind _ p _ _ _)):ds) )) = (newStack,newExpression)
-    where
-          expression = [| $(newExpression) |]
-          (newStack,exps) = mapAccumL stmtToE stack (map (E.LetStmt . E.BDecls . return) d)
-          newExpression = [| $(foldl1 next exps) |]
-
-stmtToE _ _ = error "not implemented, TODO"
-
-next x y = TH.uInfixE x (TH.dyn ">>>") y
-
-stackTup stack = returnQ $ case stack of
-                   [] -> error "empty stack"
-                   [s] -> TupP [s]
-                   (s:ss) -> TupP [s,TupP ss]
-
-cmdToE :: [TH.Pat] -> E.Exp -> TH.ExpQ
-cmdToE stack (E.LeftArrApp (aToExp stack -> expr) (aToExp stack -> expr2)) = do
-    let expArr = expr >>= replaceArr
-    [| $(C.arr [|(\ $(stackTup stack) -> ($expr2, $(promoted stack) )) |]) >>> $(TH.dyn "first") $expArr  |]
-
-cmdToE _ _ = error "not imlemented, TODO"
-
-
-
-
-{-
-x >:> y = infixApp (ann x) x (op (ann y) $ name (ann y) ">>>") y
-x &:& y = infixApp (ann x) x (op (ann y) $ name (ann y) "&&&") y
-firstArr l x = app l (var l $ name l "first") x
-dupArr l = app l (arrowE l) $ lamE l [pvar l $ name l "x"] $ tuple l [var l (name l "x"),var l (name l "x")]
-dupEnv l = app l (arrowE l) $ lamE l [pTuple l [PWildCard l,pvar l $ name l "x"]] $ tuple l [var l (name l "x"),var l (name l "x")]
-sndArr l = app l (arrowE l) $ var l $ name l "snd"
-fstArr l = app l (arrowE l) $ var l $ name l "fst"
-arrowE l = var l $ name l "arr"
-returnArr l = var l $ name l "returnA"
-
-arrLambda l [p] expr = App l2 (arrowE l2) $ Lambda l2 [PIrrPat l p] expr
-    where l2 = ann expr
-arrLambda l (p:pats) expr = App l2 (arrowE l2) $ Lambda l2 [pTuple l2 [PIrrPat l p,pTuple l2 $ map (PIrrPat l) pats]] expr
-    where l2 = ann expr
-
-arrowToExp :: (Show l,SrcInfo l,Eq l) => [S.Pat l] -> S.Exp l -> S.Exp l
-arrowToexpr pats (Proc _ pattern (LeftArrApp l2 expr expr2)) = arrLambda l2 [pattern] expr2 >:> expr -- simplified or adds pattern + process
-arrowToexpr pats (Proc _ pattern expr) = arrowToexpr (pattern:pats) expr
-arrowToExp pats (Do l statements) = foldl1 (>:>) expressions >:> fstArr l
-  where
-      (env,expressions) = mapAccumL stmtToExp pats statements
-
---arrowToExp pats (RightArrApp l exp exp2) = undefined
-arrowToExp _ exp = exp
-stmtToExp :: (Show l,SrcInfo l,Eq l) => [S.Pat l] -> S.Stmt l -> ([S.Pat l],S.Exp l)
-stmtToExp stack (Generator l pattern (arrowToExp stack -> expr)) = (pattern:trimStack stack,cmdToExp stack expr)
-stmtToExp stack (Qualifier l (arrowToExp stack -> expr) )        = (pattern:trimStack stack,cmdToExp stack expr)
-    where pattern = PWildCard l
---arrowStmtToExp pats (LetStmt l bs@(BDecls l2 decls)) = firstArr l $ arrLambda l pats (Let l bs
-stmtToExp _ _ = error "statement to expression TODO"
-
-cmdToExp stack (LeftArrApp l (arrowToExp stack -> exp) (arrowToExp stack -> exp2)) =  arrLambda l stack exp3 >:> firstArr l exp -- adds understanding of exp := arr (+2) <- 1 as arr (\_->1) >>> arr (+2)
- where
-     exp3 = tuple (ann exp2) [exp2,tuple (ann exp2) $ map promotePattern $ trimStack stack]
-
-trimStack ((PWildCard _):s) = s
-trimStack s = s
-
-promotePattern (PVar l name) = Var l (UnQual l name)
-promotePattern (PTuple l b pats) = Tuple l b $ map promotePattern pats
-promotePattern (PParen l pat) = Paren l $ promotePattern pat
-promotePattern (PIrrPat _ pat) = promotePattern pat
-promotePattern (PApp l qname pats) = appFun (repeat l) (Con l qname) $ map promotePattern pats
-promotePattern (PList l pats) = List l $ map promotePattern pats
-promotePattern _ = error "pattern promotion TODO"
-
-
-{-
-let tupleList = (n,(x,y))
-let setup = arr (\n -> (n,undef,undef) )
-let x = arr (\(n,(x,y)) -> n + n)  >>> id
-let y = arr (\(n,x,y) -> x) >>> arr (+1)
-let z = x+y -- binding
-let r = arr (\(n,x,y) -> z) >>> returnA
-let cleanup = arr ( \binding,tupleList -> tupleList with bindings)
-let run = setup >>> ( x &&& id ) >>> arr ( \(x',(n,(x,y)) -> (n,(x',y))) ) 
-loop $ (x &&& id) >>> cleanup >>= (y  &&& id) >>> cleanup
-
 
 ---}
-{-
-assocL :: (a,(b,c)) ~> ((a,b),c);
-assocR :: ((a,b),c) ~> (a,(b,c); 
-swap :: (a,b) ~> (b,a); 
-unitL :: a ~> ((),a); 
-retractL :: ((),a) ~> a; 
-unitR :: a ~> (a,()); 
-retractR :: (a,()) ~> a
---}
--- | From CGI
--- | Replaces all instances of a value in a list by another value.
-replace :: Eq a =>
-           a   -- ^ Value to look for
-        -> a   -- ^ Value to replace it with
-        -> [a] -- ^ Input list
-        -> [a] -- ^ Output list
-replace x y = map (\z -> if z == x then y else z)
---}
---}
