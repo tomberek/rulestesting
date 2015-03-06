@@ -1,7 +1,7 @@
 > {-# LANGUAGE CPP, TemplateHaskell, FlexibleInstances #-}
 
 > module Control.CCA.CCNF 
->   (norm, normOpt, 
+>   (norm, normOpt,fromAExp,
 >    pprNorm, pprNormOpt, printCCA, ASyn(..),AExp(..),
 >    cross, dup, swap, assoc, unassoc, juggle, trace, mirror, untag, tagT, untagT) where
 

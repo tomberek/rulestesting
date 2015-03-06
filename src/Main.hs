@@ -10,7 +10,6 @@ import Prelude hiding (id,(.))
 import Data.List (intercalate)
 import Examples
 import Parser
-import Control.Arrow
 import Control.CCA.CCNF
 import Language.Haskell.TH (runQ)
 
@@ -28,22 +27,24 @@ nth' n (i, f) = aux n i
       where (x, i') = f ((), i)
 runIt x = nth' 0
 
-a :: Int -> Int
+--a :: Int -> Int
 (_,a) = [arrowExpOpt|
     proc n -> do
-        b <- arr (+1) -< n +1
-        let c = b + 2* n
-        returnA -< c + 4
+        rec b <- init (1::Int) -< c
+            let c = b
+        returnA -< c
         |]
+---}
 
 main :: IO ()
 main = do
     --(runQ $ unTypeQ g) >>= print
-    print $ a 2
+    --print $ a 2
     runQ [arrowExp|
         proc n -> do
-        b <- arr (*10) -<  d+5
-        returnA -< n+1
+        rec d <- init 1 -< n
+            let c = n
+        returnA -< d+1
             |]
     {-
           rec let c = n+d

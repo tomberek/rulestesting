@@ -27,20 +27,17 @@ parseArrow = parseExpWithMode arrowParseMode
 arrowExp :: QuasiQuoter
 arrowExp = QuasiQuoter {
     quoteExp = \input -> case parseArrow input of
-        ParseOk result -> norm $ AExp $ normToExp [] $ h result
+        ParseOk result -> fromAExp $ normToExp [] $ h result -- norm $ AExp $ 
         ParseFailed l err -> error $ show l ++ show err
   , quotePat = error "cannot be patterns."
   , quoteDec = error "cannot be declarations."
   , quoteType = error "cannot be types."
   }
 arrowExpOpt :: QuasiQuoter
-arrowExpOpt = QuasiQuoter {
+arrowExpOpt = arrowExp{
     quoteExp = \input -> case parseArrow input of
         ParseOk result -> normOpt $ AExp $ normToExp [] $ h result
         ParseFailed l err -> error $ show l ++ show err
-  , quotePat = error "cannot be patterns."
-  , quoteDec = error "cannot be declarations."
-  , quoteType = error "cannot be types."
   }
 
 normToExp :: [TH.Pat] -> E.Exp -> AExp
@@ -52,10 +49,18 @@ normToExp pats (E.Do statements) =
         where (_,expressions) = mapAccumL normStmt pats statements -- need stack for nexted do!
 --normToExp _ (E.App (E.Var (E.UnQual (E.Ident "arr"))) b) = Arr $ returnQ $ toExp $ h b
 normToExp _ (E.App (E.Var (E.UnQual (E.Ident "Arr"))) b) = Arr $ returnQ $ toExp $ h b
+normToExp _ (E.App (E.Var (E.UnQual (E.Ident "Init"))) b) = Init $ returnQ $ toExp $ h b
 --normToExp _ (E.UInfixE) = undefined
 normToExp _ (E.Var (E.UnQual (E.Ident "returnA"))) = Arr [| id |] -- $ TH.dyn "id"
 normToExp s (E.InfixApp (normToExp s . h -> leftExp) (E.QVarOp (E.UnQual (E.Symbol ">>>"))) (normToExp s . h -> rightExp) ) = leftExp :>>> rightExp -- $ TH.dyn "id"
 normToExp _ expr = error $ "normToExp pattern fail  " ++ show expr
+
+promoted stack = returnQ $ TupE $ map promote $ trim stack
+
+normCmd :: [TH.Pat] -> E.Exp -> AExp
+normCmd stack (E.LeftArrApp (normToExp stack . h -> expr) (returnQ . toExp . h -> expr2)) =
+    Arr [| (\ $(returnQ $ listTup stack) -> ($expr2,$(promoted stack) )) |] :>>> (First expr)
+normCmd _ _ = error "not imlemented, TODO"
 
 normStmt :: [TH.Pat] -> E.Stmt -> ([TH.Pat],AExp)
 normStmt stack (E.Generator _ (toPat -> pattern) (h -> expr)) = (pattern:trim stack,normCmd stack expr)
@@ -68,37 +73,34 @@ normStmt stack (E.LetStmt (E.BDecls d@((decls@(E.PatBind _ p _ _ _)):ds) )) = (n
     where
           (newStack,exps) = mapAccumL normStmt stack (map (E.LetStmt . E.BDecls . return) d)
           newExpression = foldl1 (:>>>) exps
-normStmt s@(returnQ . TupP -> stack) (E.RecStmt statements) = (newStack,exps)
+normStmt s@(returnQ . TupP -> stack) (E.RecStmt statements) = (collectedPats ++ s,exps)
     where
-        exps = Loop $ Arr [| (\ ($stack,$(returnQ $ TupP collectedPats)) 
-                             -> ($(returnQ collectedExps),$(returnQ $ TupE $ map promote $ collectedPats ++ s) )) |] :>>> arrows :>>> Arr [| \x -> (x,x) |]
-        newStack = collectedPats ++ s
-        (map toPat -> collectedPats,toExp . h . rend -> collectedExps) = unzip $ map collectRecData statements
+        exps = Loop ( Arr [| (\ ($stack,$(returnQ $ TupP collectedPats))
+                             -> ($(returnQ collectedExps) , $(returnQ $ TupE $ map promote s)) ) |]
+                     :>>> First arrows
+                     :>>> Arr [| \($(returnQ $ TupP collectedPats),$stack) -> ( $(returnQ $ TupE newStack), $(returnQ $ TupE $ map promote collectedPats)) |] )  -- should output, (newstack,collectedPats)
+
+        newStack = map promote $ collectedPats ++ s
+        newPatterns = returnQ $ TupP $ collectedPats ++ s
+        (map toPat . concat -> collectedPats,toExp . h . tuple -> collectedExps) = unzip $ map collectRecData statements
         arrows = foldl1 (*:*) $ map collectArrows statements
 x *:* y = First x :>>> Arr [| \(a,b)->(b,a) |] :>>> First y :>>> Arr [| \(a,b)->(b,a) |]
 
-rend [s] = tuple [s]
-rend (s:ss) = tuple [s,rend ss]
-rend [] = tuple []
+rend t [s] = t [s]
+rend t (s:ss) = t [s,rend t ss]
+rend t [] = t []
 
-collectRecData (E.Generator _ pat (E.LeftArrApp exp1 expr)) = (pat,expr)
-collectRecData (E.Qualifier (E.LeftArrApp exp1 expr)) = (PWildCard,expr)
-collectRecData (E.LetStmt (E.BDecls decls)) = (\(a,b) -> (pTuple a,tuple b)) $ unzip $ map (\(E.PatBind _ p _ (UnGuardedRhs rhs) _) -> (p,rhs)) decls
-collectRecData (E.RecStmt stmts) = (\(a,b) -> (pTuple a,tuple b)) $ unzip $ map collectRecData stmts
+collectRecData (E.Generator _ pat (E.LeftArrApp exp1 expr)) = ([pat],expr)
+collectRecData (E.Qualifier (E.LeftArrApp exp1 expr)) = ([PWildCard],expr)
+collectRecData (E.LetStmt (E.BDecls decls)) = (\(a,b) -> (a,tuple b)) $ unzip $ map (\(E.PatBind _ p _ (UnGuardedRhs rhs) _) -> (p,rhs)) decls
+collectRecData (E.RecStmt stmts) = (\(a,b) -> (concat a,tuple b)) $ unzip $ map collectRecData stmts
 collectRecData x = error $ "Error in collection of expressions: " ++ show x
 
-collectArrows (E.Generator _ _ (E.LeftArrApp exp1 _)) = Arr $ returnQ $ toExp $ exp1
-collectArrows (E.Qualifier (E.LeftArrApp exp1 _)) = Arr $ returnQ $ toExp $ exp1
+collectArrows (E.Generator _ _ (E.LeftArrApp exp1 _)) = normToExp undefined exp1 -- Arr $ returnQ $ toExp $ exp1
+collectArrows (E.Qualifier (E.LeftArrApp exp1 _)) = normToExp undefined exp1
 collectArrows (E.LetStmt (E.BDecls decls)) = Arr [| id |] -- capture for arr'?
 --collectArrows (E.RecStmt stmts) = _ $ map collectArrows stmts
 collectArrows x = error $ "Error in collections of arrows: " ++ show x
-
-promoted stack = returnQ $ TupE $ map promote $ trim stack
-
-normCmd :: [TH.Pat] -> E.Exp -> AExp
-normCmd stack (E.LeftArrApp (normToExp stack . h -> expr) (returnQ . toExp . h -> expr2)) =
-    Arr [| (\ $(returnQ $ listTup stack) -> ($expr2,$(promoted stack) )) |] :>>> (First expr)
-normCmd _ _ = error "not imlemented, TODO"
 
 listTup [s] = TupP [s]
 listTup (s:ss) = TupP [s,TupP ss]
