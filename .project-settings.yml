@@ -14,6 +14,4 @@ extra-packages: ''
 ghc-args:
 - -fenable-rewrite-rules
 - -fno-max-relevant-binds
-excluded-modules:
-- Control/CCA.hs
-- Language/Haskell/TH/Instances1.hs
+excluded-modules: []
