@@ -2,7 +2,7 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE ViewPatterns #-}
 -- Thomas Bereknyei 2015
-module Control.Arrow.Init.TH (arrow,arrowOpt,norm,normOpt,ArrowInit(..)) where
+module Control.Arrow.Init.TH (arrow,arrowOpt,norm,normOpt,ArrowInit(..),temp3,norm1,arrowTest) where
 import Language.Haskell.Exts
 import qualified Language.Haskell.Exts.Syntax as E
 import Language.Haskell.Meta
@@ -12,6 +12,8 @@ import qualified Language.Haskell.TH.Syntax as TH
 import Data.List (mapAccumL)
 import Control.Arrow.Init.Optimize
 import Data.Generics.Uniplate.Data
+import Debug.Trace (trace)
+import qualified Arrow as A
 
 arrowParseMode :: ParseMode
 arrowParseMode = defaultParseMode{extensions=[EnableExtension Arrows]}
@@ -21,8 +23,8 @@ parseArrow = parseExpWithMode arrowParseMode
 arrow :: QuasiQuoter
 arrow = QuasiQuoter {
     quoteExp = \input -> case parseArrow input of
-        ParseOk result -> fromAExp $ normToExp [] $ h result
-        --ParseOk result -> norm $ normToExp [] $ h result
+        --ParseOk result -> fromAExp $ normToExp [] $ h result
+        ParseOk result -> norm $ normToExp [] $ h result
         ParseFailed l err -> error $ show l ++ show err
   , quotePat = error "cannot be patterns."
   , quoteDec = error "cannot be declarations."
@@ -34,6 +36,13 @@ arrowOpt = arrow{
         ParseOk result -> normOpt $ normToExp [] $ h result
         ParseFailed l err -> error $ show l ++ show err
   }
+arrowTest :: QuasiQuoter
+arrowTest = arrow{
+    quoteExp = \input -> case parseArrow input of
+        ParseOk result -> temp3 result >>= returnQ . lowerTH
+        ParseFailed l err -> error $ show l ++ show err
+  }
+
 
 normToExp :: [TH.Pat] -> E.Exp -> AExp
 normToExp pats (E.Proc _ (toPat -> pattern) (h -> expr)) = normToExp (pattern:pats) expr
@@ -44,19 +53,30 @@ normToExp pats (E.Do statements) =
         where (_,expressions) = mapAccumL normStmt pats statements -- need stack for nexted do!
 normToExp _ (E.App (E.Var (E.UnQual (E.Ident "Arr"))) b) = Arr $ returnQ $ toExp  b
 normToExp _ (E.App (E.Var (E.UnQual (E.Ident "Init"))) b) = Init $ returnQ $ toExp b
-normToExp _ (E.Var (E.UnQual (E.Ident "returnA"))) = Arr [| id |]
-normToExp s (E.InfixApp (normToExp s -> leftExp) (E.QVarOp (E.UnQual (E.Symbol ">>>"))) (normToExp s -> rightExp) ) = leftExp :>>> rightExp
-normToExp s (E.InfixApp (normToExp s -> leftExp) (E.QVarOp (E.UnQual (E.Symbol "<<<"))) (normToExp s -> rightExp) ) = rightExp :>>> leftExp
-normToExp s (E.InfixApp (normToExp s -> leftExp) (E.QVarOp (E.UnQual (E.Symbol "***"))) (normToExp s -> rightExp) ) = rightExp :>>> leftExp
-normToExp _ expr = error $ "normToExp pattern fail  " ++ show expr
+normToExp s (E.InfixApp (normToExp s -> leftExp) (E.QVarOp (E.UnQual (E.Ident ":>>>"))) (normToExp s -> rightExp) ) = normalize $ leftExp :>>> rightExp
+normToExp s (E.InfixApp (normToExp s -> leftExp) (E.QVarOp (E.UnQual (E.Ident ":***"))) (normToExp s -> rightExp) ) = normalize $ leftExp :*** rightExp
+--normToExp _ (E.Var (E.UnQual (E.Ident "returnA"))) = Arr [| id |]
+--normToExp s (E.InfixApp (normToExp s -> leftExp) (E.QVarOp (E.UnQual (E.Symbol "<<<"))) (normToExp s -> rightExp) ) = rightExp :>>> leftExp
+--normToExp s (E.InfixApp (normToExp s -> leftExp) (E.QVarOp (E.UnQual (E.Symbol "***"))) (normToExp s -> rightExp) ) = rightExp :>>> leftExp
+--normToExp _ expr = error "normToExp fail"
+normToExp _ expr = Debug.Trace.trace "normToExp pattern fail" $ Expr $ returnQ $ toExp $ expr
 
 promoted :: [TH.Pat] -> Q TH.Exp
 promoted stack = returnQ $ TupE $ map promote $ trim stack
 
 normCmd :: [TH.Pat] -> E.Exp -> AExp
-normCmd stack (E.LeftArrApp (normToExp stack -> expr) (returnQ . toExp -> expr2)) =
+normCmd stack (E.LeftArrApp (normToExp stack . h -> expr) (returnQ . toExp -> expr2)) =
     Arr [| (\ $(returnQ $ partitionStack stack) -> ($expr2,$(promoted stack) )) |] :>>> (First expr)
 normCmd _ _ = error "not imlemented, TODO"
+
+temp :: ArrowInit a => E.Exp -> Q (TH.TExp (a Int Int))
+temp f = [|| $$(returnQ $ TExp $ toExp f) ||]
+temp2 :: E.Exp -> Q (TH.TExp (A.Arr f m Int Int))
+temp2 f = temp f
+temp3 :: E.Exp -> Q (TH.Exp)
+temp3 f = unTypeQ $ temp2 f
+norm1 (AExp f) = norm f
+
 
 normStmt :: [TH.Pat] -> E.Stmt -> ([TH.Pat],AExp)
 normStmt stack (E.Generator _ (toPat -> pattern) (h -> expr)) = (pattern:trim stack,normCmd stack expr)
@@ -133,6 +153,9 @@ h = rewrite arg
         arg (E.Var (E.UnQual (E.Symbol "returnA"))) = Just $ arrFun (var $ name "id")
         arg (E.Var (E.Qual _ (E.Ident "returnA"))) = Just $ arrFun (var $ name "id")
         arg (E.Var (E.Qual _ (E.Symbol "returnA"))) = Just $ arrFun (var $ name "id")
+        arg (E.InfixApp leftExp (E.QVarOp (E.UnQual (E.Symbol ">>>"))) rightExp ) = Just $ infixApp leftExp (op $ name ":>>>") rightExp
+        --arg (E.InfixApp leftExp (E.QVarOp (E.UnQual (E.Symbol "<<<"))) rightExp ) = Just $ infixApp rightExp (op $ name ":>>>") leftExp
+        --arg (E.InfixApp leftExp (E.QVarOp (E.UnQual (E.Symbol "***"))) rightExp ) = Just $ infixApp leftExp (op $ name ":***") rightExp
         arg _ = Nothing
 
 trim :: [TH.Pat] -> [TH.Pat]

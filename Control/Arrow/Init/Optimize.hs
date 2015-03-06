@@ -1,10 +1,14 @@
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE CPP, TemplateHaskell, FlexibleInstances #-}
 -- originally from CCA package: https://hackage.haskell.org/package/CCA-0.1.5.2
 module Control.Arrow.Init.Optimize
-  (norm, normOpt,fromAExp,
+  (norm, normOpt,fromAExp, normalize,
    pprNorm, pprNormOpt, printCCA, ASyn(..),AExp(..),ArrowInit(..),
    cross, dup, swap, assoc, unassoc, juggle, trace, mirror, untag, tagT, untagT,
-   swapE, dupE) where
+   swapE, dupE,lowerTH) where
 
 import Control.Category
 import Prelude hiding ((.), id, init)
@@ -13,10 +17,12 @@ import Control.Arrow
 import Control.Arrow.Init
 import Data.Char (isAlpha)
 import Language.Haskell.TH
+import Language.Haskell.TH.Syntax
+import qualified Language.Haskell.Exts.Syntax as E
+import Data.Generics.Uniplate.Data
 
 
 import qualified Data.Generics as G (everywhere, mkT)
-
 -- Internal Representation
 -- =======================
 
@@ -26,7 +32,13 @@ data AExp
   = Arr ExpQ
   | First AExp
   | AExp :>>> AExp
-  | AExp :*** AExp
+
+  | Expr ExpQ
+  | Func
+  | Effect ExpQ
+
+  | AExp :*** AExp -- added to prevent premature optimization? or to allow it?
+
   | Loop AExp
   | LoopD ExpQ ExpQ -- loop with initialized feedback
   | Init ExpQ
@@ -35,33 +47,58 @@ data AExp
 infixl 1 :>>>
 infixl 1 :***
 
-newtype ASyn b c = AExp AExp
+instance Show AExp where
+    show (Arr _) = "Arr"
+    show (First f) = "First " ++ show f
+    show (Effect _) = "Effect"
+    show (f :>>> g) = "(" ++ show f ++ " >>> " ++ show g ++ ")"
+    show (f :*** g) = "[" ++ show f ++ " *** " ++ show g ++ "]"
+    show (Loop f) = "Loop " ++ show f
+    show (LoopD _ _) = "LoopD"
+    show (Init _) = "Init"
 
 -- We use phantom types to make ASyn an Arrow.
 
+newtype ASyn (m :: * -> * ) b c = AExp AExp
 
-{-}
-  right f = arr' [| mirror |] mirror >>> left f
-            >>> arr' [| mirror |] mirror
-  f +++ g = left f >>> right g
-  f ||| g = f +++ g >>> arr' [| untag |] untag
----}
-
+instance Category (ASyn m) where
+    id = AExp (Arr [|\x -> x|])
+    AExp g . AExp f = AExp (f :>>> g)
+instance Arrow (ASyn m) where
+    arr f = error "ASyn arr not implemented"
+    first (AExp f) = AExp (First f)
+    (AExp f) *** (AExp g) = AExp (f :*** g)
+instance ArrowLoop (ASyn m) where
+    loop (AExp f) = AExp (Loop f)
+instance ArrowInit (ASyn m) where
+    --type M (ASyn m) = m
+    init i = error "ASyn init no implemented"
+    --arr' _ = arr
+{-
+--ArrowChoice only requires definition for 'left', but the default implementation
+--for 'right' and '|||' uses arr so we need to redefine them using arr' here.
+--'+++' is also redefined here for completeness.
+instance Monad m => ArrowChoice (ASyn m) where
+    left (AExp f) = AExp (Lft f)
+    right f = arr' [| mirror |] mirror >>> left f >>> arr' [| mirror |] mirror
+    f +++ g = left f >>> right g
+    f ||| g = f +++ g >>> arr' [| untag |] untag
+--}
 -- Pretty printing AExp.
 
-printCCA :: ASyn t t1 -> IO ()
+printCCA :: ASyn m t t1 -> IO ()
 printCCA (AExp x) = printAExp x
 printAExp :: AExp -> IO ()
 printAExp x = runQ (fromAExp x) >>= putStrLn . simplify . pprint
 simplify :: String -> String
-simplify = unwords . map (unwords . map aux . words) . lines 
+simplify = unwords . map (unwords . map aux . words) . lines
   where aux (c:x) | not (isAlpha c) = c : aux x
         aux x = let (_, v) = break (=='.') x
                 in if length v > 1 then aux (tail v)
                                    else x
 
--- Traversal over AExp is defined in terms of imap (intermediate map) 
--- and everywhere. 
+-- Traversal over AExp is defined in terms of imap (intermediate map)
+-- and everywhere.
 
 type Traversal = AExp -> AExp
 imap :: Traversal -> Traversal
@@ -71,29 +108,31 @@ imap h (Loop f) = Loop (h f)
 imap h (Lft f) = Lft (h f)
 imap _ x = x
 
-everywhere :: Traversal -> Traversal 
+everywhere :: Traversal -> Traversal
 everywhere h = h . imap (everywhere h)
 
 -- Normalization
 -- =============
 
 -- norm is a TH function that normalizes a given CCA, e.g., $(norm e) will
--- give the CCNF of e. 
+-- give the CCNF of e.
 
 norm :: AExp -> ExpQ         -- returns a generic ArrowInit arrow
 norm e = fromAExp (normE e)
 normE :: Traversal
-normE = everywhere normalize 
+normE = everywhere normalize
 
--- normOpt returns the pair of state and pure function as (i, f) from optimized 
--- CCNF in the form loopD i (arr f). 
+-- normOpt returns the pair of state and pure function as (i, f) from optimized
+-- CCNF in the form loopD i (arr f).
 
 normOpt :: AExp -> ExpQ      -- returns a pair of state and pure function (s, f)
 normOpt e =
   case normE e of
     LoopD i f -> tupE [i, f]
     Arr f     -> [| ( (), $(f) ) |]
-    _         -> error "The given arrow can't be normalized to optimized CCNF."
+    -- Effect f  -> [| ( (), $(f) ) |]
+    g -> error $ "Can't optimize past: " ++ show g
+    -- _         -> error $ "The given arrow can't be normalized to optimized CCNF."
 
 -- pprNorm and pprNormOpt return the pretty printed normal forms as a
 -- string.
@@ -118,6 +157,31 @@ fromAExp (Init i) = appE [|init|] i
 fromAExp (Lft f) = appE [|left|] (fromAExp f)
 fromAExp (f :*** g) = infixE (Just (fromAExp f)) [|(***)|] (Just (fromAExp g))
 
+fromAExp (Expr f) = fmap lowerTH f -- TOM added
+lowerTH :: Exp -> Exp
+lowerTH = rewrite arg
+    where
+        arg (VarE (Name (OccName "Arr") _)) = Just $ VarE (Name (OccName "arr") NameS)
+        arg (VarE (Name (OccName ":>>>") _)) = Just $ VarE (Name (OccName ">>>") NameS)
+        {-
+        arg (AppE (E.Var (E.UnQual (E.Ident "arr"))) b) = Just $ arrFun b
+        arg (E.App (E.Var (E.UnQual (E.Symbol "arr"))) b) = Just $ arrFun b
+        arg (E.App (E.Var (E.Qual _ (E.Symbol "arr"))) b) = Just $ arrFun b
+        arg (E.App (E.Var (E.Qual _ (E.Ident "arr"))) b) = Just $ arrFun b
+        arg (E.App (E.Var (E.UnQual (E.Ident "init"))) b) = Just $ app (var (name "Init")) b
+        arg (E.App (E.Var (E.UnQual (E.Symbol "init"))) b) = Just $ app (var (name "Init")) b
+        arg (E.App (E.Var (E.Qual _ (E.Symbol "init"))) b) = Just $ app (var (name "Init")) b
+        arg (E.App (E.Var (E.Qual _ (E.Ident "init"))) b) = Just $ app (var (name "Init")) b
+        arg (E.Var (E.UnQual (E.Ident "returnA"))) = Just $ arrFun (var $ name "id")
+        arg (E.Var (E.UnQual (E.Symbol "returnA"))) = Just $ arrFun (var $ name "id")
+        arg (E.Var (E.Qual _ (E.Ident "returnA"))) = Just $ arrFun (var $ name "id")
+        arg (E.Var (E.Qual _ (E.Symbol "returnA"))) = Just $ arrFun (var $ name "id")
+        arg (E.InfixApp leftExp (E.QVarOp (E.UnQual (E.Symbol ">>>"))) rightExp ) = Just $ infixApp leftExp (op $ name ":>>>") rightExp
+        --arg (E.InfixApp leftExp (E.QVarOp (E.UnQual (E.Symbol "<<<"))) rightExp ) = Just $ infixApp rightExp (op $ name ":>>>") leftExp
+        --arg (E.InfixApp leftExp (E.QVarOp (E.UnQual (E.Symbol "***"))) rightExp ) = Just $ infixApp leftExp (op $ name ":***") rightExp
+        -}
+        arg _ = Nothing
+
 -- CCNF
 -- ====
 
@@ -133,6 +197,9 @@ normalize (LoopD i f :>>> LoopD j g) = LoopD (tupE [i,j])
 normalize (Loop (LoopD i f)) = LoopD i (traceE (juggleE `o` f `o` juggleE))
 normalize (First (LoopD i f)) = LoopD i (juggleE `o` (f `crossE` idE) `o` juggleE)
 normalize (Init i) = LoopD i swapE
+
+normalize (Arr f :>>> Expr g) = Arr (g `o` f) -- TOM added
+normalize (First (Expr (fmap lowerTH -> f))) = Arr (f `crossE` idE)
 
 -- Choice:
 

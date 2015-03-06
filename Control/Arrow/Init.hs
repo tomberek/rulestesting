@@ -5,12 +5,14 @@ module Control.Arrow.Init where
 import Control.Category
 
 import Control.Arrow
-
+import Language.Haskell.TH
 
 import Prelude hiding (init)
 
 class (Arrow a, ArrowLoop a) => ArrowInit a where
   init :: b -> a b b
+  
+  --arr' :: ExpQ -> (b->c) -> a b c
   loopD :: e -> ((b, e) -> (c, e)) -> a b c
   loopD i f = loop (arr f >>> second (init i))
 

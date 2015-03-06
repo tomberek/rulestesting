@@ -1,4 +1,5 @@
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE Arrows #-}
 module Main where
 
@@ -6,8 +7,10 @@ import Control.Category
 import Prelude hiding (id,(.))
 import Control.Arrow
 import Control.Arrow.Init.TH
+import Control.Arrow.Init.Optimize
 import Language.Haskell.TH (runQ)
 import Examples
+import qualified Arrow as A
 
 runCCNF :: e -> ((b, e) -> (c, e)) -> [b] -> [c]
 runCCNF i f = g i
@@ -47,19 +50,17 @@ complexB = proc n -> do
     d <- arr (+1) >>> arr (+43) -< a + c
     returnA -< (c,a)
 ---}
+ex :: A.Arr f IO Int Int
+ex = temp2
+t1 (AExp x) = x
 main :: IO ()
 main = do
+    print $ ex
     print $ nth' 2 exampleOpt
     print $ complexA 2
-    {-}
     runQ [arrow|
         proc n -> do
-        Just a  <- arr (\x -> Just x) -< n
-        rec
-                e <- arr id -< a + n
-                f <- arr id -< a - n
-                g <- arr id -< a * n
-                _ <- arr id -< e
+        e <- arr (+1) <<< arr ((-) 1) -< n
         returnA -< e+1
             |]
     --}
