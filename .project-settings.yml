@@ -15,4 +15,8 @@ ghc-args:
 - -fdefer-type-errors
 - -fenable-rewrite-rules
 - -fno-max-relevant-binds
-excluded-modules: []
+excluded-modules:
+- Arrow.hs
+- Auto.hs
+- Control/Arrow/Init/Normalize.hs
+- Control/Arrow/Init/TH.hs

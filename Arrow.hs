@@ -127,3 +127,4 @@ instance ArrowLoop (Arr eff m) where
     loop = Loop
 instance ArrowInit (Arr eff m) where
     init = Init
+    --arr' =

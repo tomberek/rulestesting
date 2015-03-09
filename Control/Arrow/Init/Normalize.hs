@@ -61,7 +61,7 @@ instance Category (Arr f m) where
     id = Arr id
     g . f = (f :>>> g)
 instance Arrow (Arr f m) where
-    arr f = undefined
+    arr f = error "ASyn arr not implemented"
     first f = First f
     f *** g = f :*** g
 instance ArrowLoop (Arr f m) where

@@ -56,6 +56,8 @@ instance Show AExp where
     show (Loop f) = "Loop " ++ show f
     show (LoopD _ _) = "LoopD"
     show (Init _) = "Init"
+instance Show (ASyn m a b) where
+    show (AExp x) = show x
 
 -- We use phantom types to make ASyn an Arrow.
 
@@ -73,7 +75,7 @@ instance ArrowLoop (ASyn m) where
 instance ArrowInit (ASyn m) where
     --type M (ASyn m) = m
     init i = error "ASyn init no implemented"
-    --arr' _ = arr
+    arr' _ = arr
 {-
 --ArrowChoice only requires definition for 'left', but the default implementation
 --for 'right' and '|||' uses arr so we need to redefine them using arr' here.

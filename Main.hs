@@ -11,20 +11,17 @@ import Control.Arrow.Init.Optimize
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax
 import Examples
-import qualified Arrow as A
+--import qualified Arrow as A
 
 t1 (AExp x) = x
 main :: IO ()
 main = do
-    --print $ ex
---    print $ nth' 2 exampleOpt
---    print $ complexA 2
-      let example = $( [arrowTest|
-         (\a -> (a,a))
-            |] )
-          in print $ example 4
-      print "hi"
-
+    print $ show temp2
+    let a =  [arrowTH|
+        \(Just a) -> (a,a,a)
+        |]
+        in print $ a (Just 3)
+    print "hi"
 runCCNF :: e -> ((b, e) -> (c, e)) -> [b] -> [c]
 runCCNF i f = g i
         where

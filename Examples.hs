@@ -2,15 +2,14 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE Arrows #-}
 module Examples where
-import Control.Arrow.Init.TH
+import Control.Arrow.TH
 import Control.Arrow.Init.Optimize
 import Control.Arrow
-temp f = [| $(temp3 f) |]
-t = temp3
 
-temp2 :: ArrowInit a => a Int Int
-temp2 = [arrowTest| arr (+1) >>> arr (+2) |]
+temp2 :: ASyn m Int Int
+temp2 = [arrowTH| arr ( (+) 2) |]
 
+{-
 example0 :: ArrowInit a => a Int Int
 example0 = [arrow|proc n -> arr (+1) -< n+2 |]
 

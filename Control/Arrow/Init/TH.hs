@@ -13,7 +13,7 @@ import Data.List (mapAccumL)
 import Control.Arrow.Init.Optimize
 import Data.Generics.Uniplate.Data
 import Debug.Trace (trace)
-import qualified Arrow as A
+--import qualified Arrow as A
 
 arrowParseMode :: ParseMode
 arrowParseMode = defaultParseMode{extensions=[EnableExtension Arrows]}
@@ -72,7 +72,7 @@ normCmd _ _ = error "not imlemented, TODO"
 
 temp :: ArrowInit a => E.Exp -> Q (TH.TExp (a Int Int))
 temp f = [|| $$(returnQ $ TExp $ toExp f) ||]
-temp2 :: E.Exp -> Q (TH.TExp (A.Arr f m Int Int))
+temp2 :: E.Exp -> Q (TH.TExp (ASyn m Int Int))
 temp2 f = temp f
 temp3 :: E.Exp -> Q (TH.Exp)
 temp3 f = unTypeQ $ temp2 f

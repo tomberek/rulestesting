@@ -28,8 +28,40 @@ arrow = QuasiQuoter {
   , quoteType = error "cannot be types."
   }
 arrowTest = arrow{quoteExp = \input -> case parseArrow input of
-        E.ParseOk result -> returnQ $ toExp $ thApp "returnQ" $ g result
+        E.ParseOk result -> returnQ $ toExp $
+                    E.Tuple E.Boxed [g result,result]
         E.ParseFailed l err -> error $ show l ++ show err}
+arrowTH = arrow{quoteExp = \input -> case parseArrow input of
+          E.ParseOk result -> arrFixer $ toExp result
+          E.ParseFailed l err -> error $ show l ++ show err}
+p :: Pat -> Q Exp
+p (VarP name) = [| VarP name |]
+p (ParensP pat) = [| ParensP $(p pat) |]
+p (ConP name pats) = [| ConP name $(mapM p pats >>= returnQ . ListE) |]
+p (TupP pats) = [| TupP $(mapM p pats >>= returnQ . ListE) |]
+
+f :: Exp -> Q Exp
+f (VarE name) = [| VarE name |]
+f (LitE lit) = [| LitE lit |]
+f (AppE expr expr2) = [| AppE $(f expr) $(f expr2) |]
+f (ParensE expr) = [| ParensE $(f expr) |]
+--f (InfixE (Just mexpr) expr (Just mexpr2)) = [| InfixE $(f mexpr) $(f expr) (Just $(f mexpr2)) |]
+--f (InfixE Nothing expr (Just mexpr2)) = [| InfixE Nothing ($(f expr)) (Just $(f mexpr2)) |]
+f (TupE exps) = [| TupE $(mapM f exps >>= returnQ . ListE) |]
+f (LamE pats expr) = [| LamE $(mapM p pats >>= returnQ . ListE) $(f expr) |]
+f x = error $ "func f: " ++ show x
+arrFixer :: Exp -> Q Exp
+arrFixer = rewriteM arg
+    where
+        arg (AppE (VarE (Name (OccName "arr") NameS)) expr) =
+            fmap Just [| arr' (returnQ $(f expr)) $(returnQ expr) |]
+        arg _ = return Nothing
+g :: E.Exp -> E.Exp
+g = rewrite arg
+    where
+        arg l@(E.Lambda _ _ _) = Just $ test l
+        arg _ = Nothing
+
 
 type Stack = (Pat,[Pat])
 s -:- (t,ss) = (s,t:ss)
@@ -48,6 +80,7 @@ procExp expr = returnQ $ toExp expr
 
 cmdToTH :: Stack -> E.Exp -> Q Exp
 cmdToTH stack (E.LeftArrApp expr expr2) = [| normE $(returnQ $ toExp expr) |]
+cmdToTH stack exp = error $ "non-exaust: " ++ show stack ++ show exp
 
 arrFun :: E.Exp -> E.Exp
 arrFun x = E.appFun (E.var (E.name "Exp")) undefined
@@ -55,6 +88,7 @@ arrFun x = E.appFun (E.var (E.name "Exp")) undefined
 thApp x y = E.App (E.Var $ E.Qual (E.ModuleName "Language.Haskell.TH.Syntax") (E.Ident x)) y
 thConSyntaxE x y = E.App (E.Con $ E.Qual (E.ModuleName "Language.Haskell.TH.Syntax") (E.Ident x)) y
 thConE x y = E.App (E.Con $ E.Qual (E.ModuleName "Language.Haskell.TH") (E.Ident x)) y
+unCon x = E.Con $ E.UnQual (E.Ident x)
 thCon x = E.Con $ E.Qual (E.ModuleName "Language.Haskell.TH") (E.Ident x)
 thConSyntax x = E.Con $ E.Qual (E.ModuleName "Language.Haskell.TH.Syntax") (E.Ident x)
 th x = E.Var $ E.Qual (E.ModuleName "Language.Haskell.TH") (E.Ident x)
@@ -64,22 +98,24 @@ thParensP x = thApp "ParensP" x
 thTupP x = thApp "TupP" x
 thTupE x = thConE "TupE" $ E.List x
 tha = NameS
+thNameS string = E.appFun (thConSyntax "Name") [(E.App (thConSyntax "OccName")
+            $ E.strE string), thConSyntax "NameS"]
 thName (E.Ident string) = E.appFun (thConSyntax "Name") [(E.App (thConSyntax "OccName")
                     $ E.strE string), thConSyntax "NameS"]
 
 patToExts :: E.Pat -> E.Exp
 patToExts (E.PVar name) = thConE "VarP" $ thName name
+patToExts (E.PApp (E.UnQual name) pats ) = E.appFun (thConE "ConP" $ thName name) $ map patToExts pats
+patToExts (E.PParen pat) = thConE "ParensP" $ patToExts pat
 
 test (E.Var (E.UnQual name)) = thVarE $ thName name
 test (E.Tuple E.Boxed exps) = thTupE $ map test exps
 test (E.Lambda _ pats exp) = E.appFun (thCon "LamE") [E.List $ map patToExts pats,test exp]
 
-                                  --  [pat] exp
-g :: E.Exp -> E.Exp
-g = rewrite arg
-    where
-        arg l@(E.Lambda _ _ _) = Just $ test l
-        arg _ = Nothing
+data Test a b = Test Exp (a->b)
+instance Show (Test a b) where
+    show (Test exp _) = show exp
+
 
 h :: E.Exp -> E.Exp
 h = rewrite arg
