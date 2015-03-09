@@ -75,7 +75,7 @@ instance ArrowLoop (ASyn m) where
 instance ArrowInit (ASyn m) where
     --type M (ASyn m) = m
     init i = error "ASyn init no implemented"
-    arr' _ = arr
+    arr' f _ = AExp (Arr f)
 {-
 --ArrowChoice only requires definition for 'left', but the default implementation
 --for 'right' and '|||' uses arr so we need to redefine them using arr' here.

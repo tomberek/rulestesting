@@ -7,7 +7,7 @@ import Control.Arrow.Init.Optimize
 import Control.Arrow
 
 temp2 :: ASyn m Int Int
-temp2 = [arrowTH| arr ( (+) 2) |]
+temp2 = [arrowTH| arr (\a -> (a+3)) >>> arr (+3) |]
 
 {-
 example0 :: ArrowInit a => a Int Int
