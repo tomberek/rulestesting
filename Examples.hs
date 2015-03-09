@@ -1,12 +1,12 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE Arrows #-}
 module Examples where
 import Control.Arrow.Init.TH
 import Control.Arrow.Init.Optimize
 import Control.Arrow
 temp f = [| $(temp3 f) |]
 t = temp3
-
 
 temp2 :: ArrowInit a => a Int Int
 temp2 = [arrowTest| arr (+1) >>> arr (+2) |]

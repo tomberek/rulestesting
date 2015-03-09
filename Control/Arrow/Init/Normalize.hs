@@ -4,11 +4,14 @@
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE CPP, TemplateHaskell, FlexibleInstances #-}
 -- originally from CCA package: https://hackage.haskell.org/package/CCA-0.1.5.2
-module Control.Arrow.Init.Optimize
-  (norm, normOpt,fromAExp, normalize, normE,
-   pprNorm, pprNormOpt, printCCA, ASyn(..),AExp(..),ArrowInit(..),
-   cross, dup, swap, assoc, unassoc, juggle, trace, mirror, untag, tagT, untagT,
-   swapE, dupE,lowerTH) where
+module Control.Arrow.Init.Normalize
+{-
+    (norm, normOpt,fromAExp, normalize, normE,
+     pprNorm, pprNormOpt, printCCA, ASyn(..),AExp(..),ArrowInit(..),
+     cross, dup, swap, assoc, unassoc, juggle, trace, mirror, untag, tagT, untagT,
+     swapE, dupE,lowerTH) 
+     --}
+     where
 
 import Control.Category
 import Prelude hiding ((.), id, init)
@@ -20,7 +23,7 @@ import Language.Haskell.TH
 import Language.Haskell.TH.Syntax
 import qualified Language.Haskell.Exts.Syntax as E
 import Data.Generics.Uniplate.Data
-
+import Unsafe.Coerce
 
 import qualified Data.Generics as G (everywhere, mkT)
 -- Internal Representation
@@ -28,27 +31,22 @@ import qualified Data.Generics as G (everywhere, mkT)
 
 -- We use AExp to syntactically represent an arrow for normalization purposes. 
 
-data AExp
-  = Arr ExpQ
-  | First AExp
-  | AExp :>>> AExp
-
-  | Expr ExpQ
-  | Func
-  | Effect ExpQ
-
-  | AExp :*** AExp -- added to prevent premature optimization? or to allow it?
-
-  | Loop AExp
-  | LoopD ExpQ ExpQ -- loop with initialized feedback
-  | Init ExpQ
-  | Lft AExp
-
-infixl 1 :>>>
-infixl 1 :***
-
-instance Show AExp where
+data Arr f m a b where
+  Exp :: Exp -> (a->b) -> Arr f m a b
+  Arr :: (a -> b) -> Arr f m a b
+  ArrM :: (a -> m b) -> Arr f m a b
+  First :: Arr f m a b -> Arr f m (a, d) (b, d)
+  Effect :: f a b -> Arr f m a b
+  (:***) :: Arr f m a b -> Arr f m c d -> Arr f m (a,c) (b,d)
+  (:>>>) :: Arr f m a c -> Arr f m c b -> Arr f m a b
+  (:&&&) :: Arr f m a b -> Arr f m a b' -> Arr f m a (b,b')
+  Loop :: Arr f m (a, d) (b, d) -> Arr f m a b
+  LoopD :: e -> ((a, e) -> (b, e)) -> Arr f m a b
+  Init :: b -> Arr f m b b
+instance Show (Arr f m a b) where
+    show (Exp _ _) = "Exp: "
     show (Arr _) = "Arr"
+    show (ArrM _) = "ArrM"
     show (First f) = "First " ++ show f
     show (Effect _) = "Effect"
     show (f :>>> g) = "(" ++ show f ++ " >>> " ++ show g ++ ")"
@@ -56,24 +54,20 @@ instance Show AExp where
     show (Loop f) = "Loop " ++ show f
     show (LoopD _ _) = "LoopD"
     show (Init _) = "Init"
+infixl 1 :>>>
+infixl 1 :***
 
--- We use phantom types to make ASyn an Arrow.
-
-newtype ASyn (m :: * -> * ) b c = AExp AExp
-
-instance Category (ASyn m) where
-    id = AExp (Arr [|\x -> x|])
-    AExp g . AExp f = AExp (f :>>> g)
-instance Arrow (ASyn m) where
-    arr f = error "ASyn arr not implemented"
-    first (AExp f) = AExp (First f)
-    (AExp f) *** (AExp g) = AExp (f :*** g)
-instance ArrowLoop (ASyn m) where
-    loop (AExp f) = AExp (Loop f)
-instance ArrowInit (ASyn m) where
-    --type M (ASyn m) = m
+instance Category (Arr f m) where
+    id = Arr id
+    g . f = (f :>>> g)
+instance Arrow (Arr f m) where
+    arr f = undefined
+    first f = First f
+    f *** g = f :*** g
+instance ArrowLoop (Arr f m) where
+    loop f = Loop f
+instance ArrowInit (Arr f m) where
     init i = error "ASyn init no implemented"
-    --arr' _ = arr
 {-
 --ArrowChoice only requires definition for 'left', but the default implementation
 --for 'right' and '|||' uses arr so we need to redefine them using arr' here.
@@ -85,17 +79,29 @@ instance Monad m => ArrowChoice (ASyn m) where
     f ||| g = f +++ g >>> arr' [| untag |] untag
 --}
 -- Pretty printing AExp.
+          {-
 
-printCCA :: ASyn m t t1 -> IO ()
-printCCA (AExp x) = printAExp x
-printAExp :: AExp -> IO ()
-printAExp x = runQ (fromAExp x) >>= putStrLn . simplify . pprint
+printArr :: Arr f m a b -> IO ()
+printArr x = runQ (fromAExp x) >>= putStrLn . simplify . pprint
 simplify :: String -> String
 simplify = unwords . map (unwords . map aux . words) . lines
   where aux (c:x) | not (isAlpha c) = c : aux x
         aux x = let (_, v) = break (=='.') x
                 in if length v > 1 then aux (tail v)
                                    else x
+
+-- fromAExp converts AExp back to TH Exp structure.
+
+fromAExp :: Arr f m a b -> ExpQ
+fromAExp (Exp f) = appE [|arr|] $ returnQ $ unType f
+fromAExp (Arr f) = appE [|arr|] $ fmap unType [|| (\a -> f a) ||]
+fromAExp (First f) = appE [|first|] (fromAExp f)
+fromAExp (f :>>> g) = infixE (Just (fromAExp f)) [|(>>>)|] (Just (fromAExp g))
+fromAExp (Loop f) = appE [|loop|] (fromAExp f)
+fromAExp (LoopD i f) = appE (appE [|loopD|] i) f
+fromAExp (Init i) = appE [|init|] i
+fromAExp (f :*** g) = infixE (Just (fromAExp f)) [|(***)|] (Just (fromAExp g))
+
 
 -- Traversal over AExp is defined in terms of imap (intermediate map)
 -- and everywhere.
@@ -144,18 +150,6 @@ pprNormOpt :: AExp -> Q Exp
 pprNormOpt = ppr' . normOpt
 ppr' :: Q Exp -> Q Exp
 ppr' e = runQ (fmap toLet e) >>= litE . StringL . simplify . pprint
-
--- fromAExp converts AExp back to TH Exp structure.
-
-fromAExp :: AExp -> ExpQ
-fromAExp (Arr f) = appE [|arr|] f
-fromAExp (First f) = appE [|first|] (fromAExp f)
-fromAExp (f :>>> g) = infixE (Just (fromAExp f)) [|(>>>)|] (Just (fromAExp g))
-fromAExp (Loop f) = appE [|loop|] (fromAExp f)
-fromAExp (LoopD i f) = appE (appE [|loopD|] i) f
-fromAExp (Init i) = appE [|init|] i
-fromAExp (Lft f) = appE [|left|] (fromAExp f)
-fromAExp (f :*** g) = infixE (Just (fromAExp f)) [|(***)|] (Just (fromAExp g))
 
 fromAExp (Expr f) = fmap lowerTH f -- TOM added
 lowerTH :: Exp -> Exp
@@ -278,3 +272,4 @@ traceE,lftE :: ExpQ -> ExpQ
 traceE = appE [|trace|]
 lftE = appE [|lft|]
 
+---}

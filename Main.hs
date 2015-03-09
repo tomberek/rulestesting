@@ -6,11 +6,24 @@ module Main where
 import Control.Category
 import Prelude hiding (id,(.))
 import Control.Arrow
-import Control.Arrow.Init.TH
+import Control.Arrow.TH
 import Control.Arrow.Init.Optimize
-import Language.Haskell.TH (runQ)
+import Language.Haskell.TH
+import Language.Haskell.TH.Syntax
 import Examples
 import qualified Arrow as A
+
+t1 (AExp x) = x
+main :: IO ()
+main = do
+    --print $ ex
+--    print $ nth' 2 exampleOpt
+--    print $ complexA 2
+      let example = $( [arrowTest|
+         (\a -> (a,a))
+            |] )
+          in print $ example 4
+      print "hi"
 
 runCCNF :: e -> ((b, e) -> (c, e)) -> [b] -> [c]
 runCCNF i f = g i
@@ -27,7 +40,7 @@ nth' n (i, f) = aux n i
 
 runIt :: t -> (b, ((), b) -> (a, b)) -> a
 runIt _ = nth' 0
-
+{-}
 exampleOpt :: (Int, ((), Int) -> (Int, Int))
 exampleOpt = [arrowOpt|
     proc () -> do
@@ -49,22 +62,6 @@ complexB = proc n -> do
     c <- arr (*10) -< a +n
     d <- arr (+1) >>> arr (+43) -< a + c
     returnA -< (c,a)
----}
-ex :: A.Arr f IO Int Int
-ex = temp2
-t1 (AExp x) = x
-main :: IO ()
-main = do
-    print $ ex
-    print $ nth' 2 exampleOpt
-    print $ complexA 2
-    runQ [arrow|
-        proc n -> do
-        e <- arr (+1) <<< arr ((-) 1) -< n
-        returnA -< e+1
-            |]
-    --}
-    print "Optimizer complete"
 
 newtype SF a b = SF { unSF :: a -> (b, SF a b) }
 instance Category SF where
@@ -91,3 +88,6 @@ runSF :: SF a b -> [a] -> [b]
 runSF f (x:xs) = let (y, f') = unSF f x
                            in y: runSF f' xs
 runSF _ [] = []
+---}
+---}
+---}

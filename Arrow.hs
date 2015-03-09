@@ -115,13 +115,10 @@ evalA exec = go
 effect :: eff a b -> Arr eff m a b
 effect = Effect
 instance Category (Arr eff m) where
-    id = arr2 id
+    id = Arr id
     (.) = flip (:>>>)
-{-# NOINLINE arr2 #-}
-arr2 :: (a->b) -> Arr f m a b
-arr2 = Arr
 instance Arrow (Arr eff m) where
-    arr = arr2
+    arr = Arr
     first = First
     second = Second
     (***) = (:***)

@@ -2,50 +2,105 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE ViewPatterns #-}
 -- Thomas Bereknyei 2015
-module Control.Arrow.Init.TH (arrow,arrowOpt,norm,normOpt,ArrowInit(..),temp3,norm1,arrowTest) where
-import Language.Haskell.Exts
-import qualified Language.Haskell.Exts.Syntax as E
+module Control.Arrow.TH where
+import qualified Language.Haskell.Exts as E
 import Language.Haskell.Meta
-import Language.Haskell.TH.Quote
+import Language.Haskell.TH
 import Language.Haskell.TH.Syntax
-import qualified Language.Haskell.TH.Syntax as TH
-import Data.List (mapAccumL)
+import Language.Haskell.TH.Quote
 import Control.Arrow.Init.Optimize
-import Data.Generics.Uniplate.Data
+import Data.Generics.Uniplate.Operations
 import Debug.Trace (trace)
-import qualified Arrow as A
 
-arrowParseMode :: ParseMode
-arrowParseMode = defaultParseMode{extensions=[EnableExtension Arrows]}
-parseArrow :: String -> ParseResult (E.Exp )
-parseArrow = parseExpWithMode arrowParseMode
+arrowParseMode :: E.ParseMode
+arrowParseMode = E.defaultParseMode{E.extensions=[E.EnableExtension E.Arrows]}
+parseArrow :: String -> E.ParseResult E.Exp
+parseArrow = E.parseExpWithMode arrowParseMode
 
 arrow :: QuasiQuoter
 arrow = QuasiQuoter {
     quoteExp = \input -> case parseArrow input of
-        ParseOk result -> fromAExp $ normToExp [] $ h result
-        --ParseOk result -> norm $ normToExp [] $ h result
-        ParseFailed l err -> error $ show l ++ show err
+        E.ParseOk result -> procExp result
+        --ParseOk result -> normToExp [] result
+        E.ParseFailed l err -> error $ show l ++ show err
   , quotePat = error "cannot be patterns."
   , quoteDec = error "cannot be declarations."
   , quoteType = error "cannot be types."
   }
-arrowOpt :: QuasiQuoter
-arrowOpt = arrow{
-    quoteExp = \input -> case parseArrow input of
-        ParseOk result -> normOpt $ normToExp [] $ h result
-        ParseFailed l err -> error $ show l ++ show err
-  }
-arrowTest :: QuasiQuoter
-arrowTest = arrow{
-    quoteExp = \input -> case parseArrow input of
-        ParseOk result -> temp3 result >>= returnQ . lowerTH
-        ParseFailed l err -> error $ show l ++ show err
-  }
+arrowTest = arrow{quoteExp = \input -> case parseArrow input of
+        E.ParseOk result -> returnQ $ toExp $ thApp "returnQ" $ g result
+        E.ParseFailed l err -> error $ show l ++ show err}
 
+type Stack = (Pat,[Pat])
+s -:- (t,ss) = (s,t:ss)
 
-normToExp :: [TH.Pat] -> E.Exp -> AExp
-normToExp pats (E.Proc _ (toPat -> pattern) (h -> expr)) = normToExp (pattern:pats) expr
+arrTH :: Q Exp -> Q Exp
+arrTH expr = appE (varE $ mkName "arr") expr
+(>:>) :: Q Exp -> Q Exp -> Q Exp
+expr1 >:> expr2 = uInfixE expr1 (varE $ mkName ">>>") expr2
+l = norm
+t = lowerTH
+procExp :: E.Exp -> Q Exp
+procExp (E.Proc _ (returnQ . toPat -> pat) (E.LeftArrApp (returnQ . toExp -> expr1) (returnQ . toExp -> expr2))) =
+    arrTH (lamE [pat] expr2) >:> [| fmap lowerTH $ norm $(expr1) |] -- special case
+procExp (E.Proc _ pat expr) = cmdToTH (toPat pat,[]) expr
+procExp expr = returnQ $ toExp expr
+
+cmdToTH :: Stack -> E.Exp -> Q Exp
+cmdToTH stack (E.LeftArrApp expr expr2) = [| normE $(returnQ $ toExp expr) |]
+
+arrFun :: E.Exp -> E.Exp
+arrFun x = E.appFun (E.var (E.name "Exp")) undefined
+
+thApp x y = E.App (E.Var $ E.Qual (E.ModuleName "Language.Haskell.TH.Syntax") (E.Ident x)) y
+thConSyntaxE x y = E.App (E.Con $ E.Qual (E.ModuleName "Language.Haskell.TH.Syntax") (E.Ident x)) y
+thConE x y = E.App (E.Con $ E.Qual (E.ModuleName "Language.Haskell.TH") (E.Ident x)) y
+thCon x = E.Con $ E.Qual (E.ModuleName "Language.Haskell.TH") (E.Ident x)
+thConSyntax x = E.Con $ E.Qual (E.ModuleName "Language.Haskell.TH.Syntax") (E.Ident x)
+th x = E.Var $ E.Qual (E.ModuleName "Language.Haskell.TH") (E.Ident x)
+thVarE x = thApp "VarE" x
+thVarP x = thApp "VarP" x
+thParensP x = thApp "ParensP" x
+thTupP x = thApp "TupP" x
+tha = NameS
+thName (E.Ident string) = E.appFun (thConSyntax "Name") [(E.App (thConSyntax "OccName")
+                    $ E.strE string), thConSyntax "NameS"]
+                    -- $ thConSyntaxE "LitE" $ thConE "StringL" $ E.strE string), thConSyntax "NameS"]
+
+patToExts :: E.Pat -> E.Exp
+patToExts (E.PVar name) = thConE "VarP" $ thName name
+
+test (E.Lambda _ pats exp) = E.appFun (thCon "LamE") [E.List $ map patToExts pats,thConSyntax "NameS"]
+    --  [pat] exp
+g :: E.Exp -> E.Exp
+g = rewrite arg
+    where
+        arg l@(E.Lambda _ _ _) = Just $ test l
+        arg _ = Nothing
+
+h :: E.Exp -> E.Exp
+h = rewrite arg
+    where
+        arg (E.App (E.Var (E.UnQual (E.Ident "arr"))) b) = Just $ arrFun b
+        arg (E.App (E.Var (E.UnQual (E.Symbol "arr"))) b) = Just $ arrFun b
+        arg (E.App (E.Var (E.Qual _ (E.Symbol "arr"))) b) = Just $ arrFun b
+        arg (E.App (E.Var (E.Qual _ (E.Ident "arr"))) b) = Just $ arrFun b
+        arg (E.App (E.Var (E.UnQual (E.Ident "init"))) b) = Just $ E.app (E.var (E.name "Init")) b
+        arg (E.App (E.Var (E.UnQual (E.Symbol "init"))) b) = Just $ E.app (E.var (E.name "Init")) b
+        arg (E.App (E.Var (E.Qual _ (E.Symbol "init"))) b) = Just $ E.app (E.var (E.name "Init")) b
+        arg (E.App (E.Var (E.Qual _ (E.Ident "init"))) b) = Just $ E.app (E.var (E.name "Init")) b
+        arg (E.Var (E.UnQual (E.Ident "returnA"))) = Just $ arrFun (E.var $ E.name "id")
+        arg (E.Var (E.UnQual (E.Symbol "returnA"))) = Just $ arrFun (E.var $ E.name "id")
+        arg (E.Var (E.Qual _ (E.Ident "returnA"))) = Just $ arrFun (E.var $ E.name "id")
+        arg (E.Var (E.Qual _ (E.Symbol "returnA"))) = Just $ arrFun (E.var $ E.name "id")
+        --arg (E.InfixApp leftExp (E.QVarOp (E.UnQual (E.Symbol ">>>"))) rightExp ) = Just $ infixApp leftExp (op $ name ":>>>") rightExp
+        --arg (E.InfixApp leftExp (E.QVarOp (E.UnQual (E.Symbol "<<<"))) rightExp ) = Just $ infixApp rightExp (op $ name ":>>>") leftExp
+        --arg (E.InfixApp leftExp (E.QVarOp (E.UnQual (E.Symbol "***"))) rightExp ) = Just $ infixApp leftExp (op $ name ":***") rightExp
+        arg _ = Nothing
+
+{-
+normToExp :: [TH.Pat] -> E.Exp -> TH.Exp
+normToExp pats (E.Proc _ (toPat -> pattern) expr) = normToExp (pattern:pats) expr
 --normToExp pats (E.Proc _ (toPat -> pattern) (h -> expr)) = error $ "TOM: " ++ show expr
 normToExp pats (E.LeftArrApp e@(normToExp pats -> expr) (returnQ . toExp -> expr2)) = let expr3 = [| normE $(returnQ $ toExp e) |] in
     Arr [| (\ $(returnQ $ TupP pats) -> $expr2) |] :>>> expr
@@ -136,28 +191,7 @@ collectArrows (E.LetStmt (E.BDecls _)) = Arr [| id |] -- nested? no arrows insid
 --collectArrows (E.RecStmt stmts) = _ $ map collectArrows stmts  nexted rec statements?
 collectArrows x = error $ "Error in collections of arrows: " ++ show x
 
-arrFun :: E.Exp -> E.Exp
-arrFun = app (var (name "Arr"))
 
-h :: E.Exp -> E.Exp
-h = rewrite arg
-    where
-        arg (E.App (E.Var (E.UnQual (E.Ident "arr"))) b) = Just $ arrFun b
-        arg (E.App (E.Var (E.UnQual (E.Symbol "arr"))) b) = Just $ arrFun b
-        arg (E.App (E.Var (E.Qual _ (E.Symbol "arr"))) b) = Just $ arrFun b
-        arg (E.App (E.Var (E.Qual _ (E.Ident "arr"))) b) = Just $ arrFun b
-        arg (E.App (E.Var (E.UnQual (E.Ident "init"))) b) = Just $ app (var (name "Init")) b
-        arg (E.App (E.Var (E.UnQual (E.Symbol "init"))) b) = Just $ app (var (name "Init")) b
-        arg (E.App (E.Var (E.Qual _ (E.Symbol "init"))) b) = Just $ app (var (name "Init")) b
-        arg (E.App (E.Var (E.Qual _ (E.Ident "init"))) b) = Just $ app (var (name "Init")) b
-        arg (E.Var (E.UnQual (E.Ident "returnA"))) = Just $ arrFun (var $ name "id")
-        arg (E.Var (E.UnQual (E.Symbol "returnA"))) = Just $ arrFun (var $ name "id")
-        arg (E.Var (E.Qual _ (E.Ident "returnA"))) = Just $ arrFun (var $ name "id")
-        arg (E.Var (E.Qual _ (E.Symbol "returnA"))) = Just $ arrFun (var $ name "id")
-        arg (E.InfixApp leftExp (E.QVarOp (E.UnQual (E.Symbol ">>>"))) rightExp ) = Just $ infixApp leftExp (op $ name ":>>>") rightExp
-        --arg (E.InfixApp leftExp (E.QVarOp (E.UnQual (E.Symbol "<<<"))) rightExp ) = Just $ infixApp rightExp (op $ name ":>>>") leftExp
-        --arg (E.InfixApp leftExp (E.QVarOp (E.UnQual (E.Symbol "***"))) rightExp ) = Just $ infixApp leftExp (op $ name ":***") rightExp
-        arg _ = Nothing
 
 trim :: [TH.Pat] -> [TH.Pat]
 trim ((ConP _ p) :ps) = (p ++ ps)
@@ -176,3 +210,7 @@ promote (TH.WildP) = TupE []
 promote x = error $ "pattern promotion TODO" ++ show x
 
 ---}
+---}
+---}
+---}
+
