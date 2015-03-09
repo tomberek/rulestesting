@@ -58,20 +58,23 @@ thConE x y = E.App (E.Con $ E.Qual (E.ModuleName "Language.Haskell.TH") (E.Ident
 thCon x = E.Con $ E.Qual (E.ModuleName "Language.Haskell.TH") (E.Ident x)
 thConSyntax x = E.Con $ E.Qual (E.ModuleName "Language.Haskell.TH.Syntax") (E.Ident x)
 th x = E.Var $ E.Qual (E.ModuleName "Language.Haskell.TH") (E.Ident x)
-thVarE x = thApp "VarE" x
+thVarE x = thConE "VarE" x
 thVarP x = thApp "VarP" x
 thParensP x = thApp "ParensP" x
 thTupP x = thApp "TupP" x
+thTupE x = thConE "TupE" $ E.List x
 tha = NameS
 thName (E.Ident string) = E.appFun (thConSyntax "Name") [(E.App (thConSyntax "OccName")
                     $ E.strE string), thConSyntax "NameS"]
-                    -- $ thConSyntaxE "LitE" $ thConE "StringL" $ E.strE string), thConSyntax "NameS"]
 
 patToExts :: E.Pat -> E.Exp
 patToExts (E.PVar name) = thConE "VarP" $ thName name
 
-test (E.Lambda _ pats exp) = E.appFun (thCon "LamE") [E.List $ map patToExts pats,thConSyntax "NameS"]
-    --  [pat] exp
+test (E.Var (E.UnQual name)) = thVarE $ thName name
+test (E.Tuple E.Boxed exps) = thTupE $ map test exps
+test (E.Lambda _ pats exp) = E.appFun (thCon "LamE") [E.List $ map patToExts pats,test exp]
+
+                                  --  [pat] exp
 g :: E.Exp -> E.Exp
 g = rewrite arg
     where
