@@ -18,7 +18,6 @@ import Control.Arrow.Init
 import Data.Char (isAlpha)
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax
-import qualified Language.Haskell.Exts.Syntax as E
 import Data.Generics.Uniplate.Data
 
 
@@ -33,9 +32,7 @@ data AExp
   | First AExp
   | AExp :>>> AExp
 
-  | Expr ExpQ
-  | Func
-  | Effect ExpQ
+  -- | Effect ExpQ
 
   | AExp :*** AExp -- added to prevent premature optimization? or to allow it?
 
@@ -50,12 +47,13 @@ infixl 1 :***
 instance Show AExp where
     show (Arr _) = "Arr"
     show (First f) = "First " ++ show f
-    show (Effect _) = "Effect"
+    --show (Effect _) = "Effect"
     show (f :>>> g) = "(" ++ show f ++ " >>> " ++ show g ++ ")"
     show (f :*** g) = "[" ++ show f ++ " *** " ++ show g ++ "]"
     show (Loop f) = "Loop " ++ show f
     show (LoopD _ _) = "LoopD"
     show (Init _) = "Init"
+    show (Lft _) = "Lft"
 instance Show (ASyn m a b) where
     show (AExp x) = show x
 
@@ -64,16 +62,16 @@ instance Show (ASyn m a b) where
 newtype ASyn (m :: * -> * ) b c = AExp AExp
 
 instance Category (ASyn m) where
-    id = AExp (Arr [|\x -> x|])
+    id = AExp (Arr [| id |])
     AExp g . AExp f = AExp (f :>>> g)
 instance Arrow (ASyn m) where
-    arr f = error "ASyn arr not implemented"
+    arr _ = error "ASyn arr not implemented"
     first (AExp f) = AExp (First f)
     (AExp f) *** (AExp g) = AExp (f :*** g)
 instance ArrowLoop (ASyn m) where
     loop (AExp f) = AExp (Loop f)
 instance ArrowInit (ASyn m) where
-    init i = error "ASyn init no implemented"
+    init _ = error "ASyn init not implemented"
     init' f _ = AExp (Init f)
     arr' f _ = AExp (Arr f)
 {-
@@ -119,8 +117,8 @@ everywhere h = h . imap (everywhere h)
 -- norm is a TH function that normalizes a given CCA, e.g., $(norm e) will
 -- give the CCNF of e.
 
-norm :: AExp -> ExpQ         -- returns a generic ArrowInit arrow
-norm e = fromAExp (normE e)
+norm :: ASyn m a b -> ExpQ         -- returns a generic ArrowInit arrow
+norm (AExp e) = fromAExp (normE e)
 normE :: Traversal
 normE = everywhere normalize
 
@@ -132,14 +130,14 @@ normOpt (AExp e) =
   case normE e of
     LoopD i f -> tupE [i, f]
     Arr f     -> [| ( (), $(f) ) |]
-    -- Effect f  -> [| ( (), $(f) ) |]
-    g -> error $ "Can't optimize past: " ++ show g
+    --Effect f  -> [| ( (), $(f) ) |]
+    g -> error $ "Perhaps not causual? Can't optimize past: " ++ show g
     -- _         -> error $ "The given arrow can't be normalized to optimized CCNF."
 
 -- pprNorm and pprNormOpt return the pretty printed normal forms as a
 -- string.
 
-pprNorm :: AExp -> Q Exp
+pprNorm :: ASyn m a b -> Q Exp
 pprNorm = ppr' . norm
 
 pprNormOpt :: ASyn m a b -> Q Exp
@@ -155,11 +153,11 @@ fromAExp (First f) = appE [|first|] (fromAExp f)
 fromAExp (f :>>> g) = infixE (Just (fromAExp f)) [|(>>>)|] (Just (fromAExp g))
 fromAExp (Loop f) = appE [|loop|] (fromAExp f)
 fromAExp (LoopD i f) = appE (appE [|loopD|] i) f
+--fromAExp (Effect i) = appE [|arrM|] i
 fromAExp (Init i) = appE [|init|] i
 fromAExp (Lft f) = appE [|left|] (fromAExp f)
 fromAExp (f :*** g) = infixE (Just (fromAExp f)) [|(***)|] (Just (fromAExp g))
 
-fromAExp (Expr f) = fmap lowerTH f -- TOM added
 lowerTH :: Exp -> Exp
 lowerTH = rewrite arg
     where
@@ -199,9 +197,6 @@ normalize (LoopD i f :>>> LoopD j g) = LoopD (tupE [i,j])
 normalize (Loop (LoopD i f)) = LoopD i (traceE (juggleE `o` f `o` juggleE))
 normalize (First (LoopD i f)) = LoopD i (juggleE `o` (f `crossE` idE) `o` juggleE)
 normalize (Init i) = LoopD i swapE
-
-normalize (Arr f :>>> Expr g) = Arr (g `o` f) -- TOM added
-normalize (First (Expr (fmap lowerTH -> f))) = Arr (f `crossE` idE)
 
 -- Choice:
 

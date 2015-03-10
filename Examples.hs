@@ -1,11 +1,22 @@
-{-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE Arrows #-}
+{-# LANGUAGE QuasiQuotes #-}
 module Examples where
 import Control.Arrow.TH
 import Control.Arrow.Init.Optimize
 import Control.Arrow
 
+example1 :: ArrowInit a => a Int Int
+example1 = [arrowTH|
+    proc n -> do
+        a  <- arr (\x -> x) -< (n::Int)
+        rec
+            e <- init 1 -< a + (1::Int)
+            g <- init 10 -< e
+        returnA -< a
+    |]
+
+
+{-
 example4 :: ArrowInit a => a Int Int
 example4 = [arrow|
      proc n -> do
@@ -28,24 +39,11 @@ example0 :: ArrowInit a => a Int Int
 example0 = [arrowTH|proc n -> arr (+1) -< n+2 |]
 
 
-example1 :: ArrowInit a => a Int Int
-example1 = [arrowTH|
-    proc n -> do
-        a  <- arr (\x -> x) -< (n::Int)
-        rec
-            e <- arr id -< a + (1::Int)
-            Just f <- arr (\a-> Just (a+3)) -< a - n
-            g <- arr id -< "aerfa"
-        returnA -< length g
-    |]
-{-
-
 example3 :: Int -> Int
-(_,example3) = [arrowOpt|
+(_,example3) = $(normOpt [arrowTH|
     proc n -> arr id -< n+2
-    |]
+    |] )
 
-{-
 i = [arrow|
     proc n -> do
         x <- id -< n + n

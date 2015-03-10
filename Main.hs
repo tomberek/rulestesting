@@ -1,30 +1,34 @@
-{-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE Arrows #-}
+{-# LANGUAGE QuasiQuotes #-}
 module Main where
 
 import Control.Category
 import Prelude hiding (id,(.))
-import Control.Arrow
+
 import Control.Arrow.TH
 import Control.Arrow.Init.Optimize
-import Language.Haskell.TH
-import Language.Haskell.TH.Syntax
+
 import Examples
 --import qualified Arrow as A
 
-t1 (AExp x) = x
 main :: IO ()
 main = do
     --print $ show temp2
-    let a@(AExp b) =  [arrowTH|
+    {-
+    let (a,b) = $(normOpt [arrowTH|
         proc n -> do
-            g <- arr (+3) -< 10*n
-            rec let z = g+n
-                y <- arr (+1) -< z
+            rec let z = n
+                    b = 0
+                    p = 5
+                y <- init 2 -< b
             returnA -< y
-        |]
-        in print $ a
+        |] )
+    print $ show $ b (10,2)
+    print $ show a
+    ---}
+    print $ (example1 :: ASyn m Int Int)
+    let d@(AExp c) = $(norm example1)
+    print $ d
     print "hi"
 
 runCCNF :: e -> ((b, e) -> (c, e)) -> [b] -> [c]

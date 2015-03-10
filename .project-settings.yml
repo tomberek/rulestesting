@@ -12,7 +12,6 @@ cabal-file: project.cabal
 version: 1
 extra-packages: ''
 ghc-args:
-- -fdefer-type-errors
 - -fenable-rewrite-rules
 - -fno-max-relevant-binds
 excluded-modules:
@@ -20,4 +19,3 @@ excluded-modules:
 - Auto.hs
 - Control/Arrow/Init/Normalize.hs
 - Control/Arrow/Init/TH.hs
-- Language/Haskell/TH/Raise.hs
