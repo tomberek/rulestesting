@@ -73,8 +73,8 @@ instance Arrow (ASyn m) where
 instance ArrowLoop (ASyn m) where
     loop (AExp f) = AExp (Loop f)
 instance ArrowInit (ASyn m) where
-    --type M (ASyn m) = m
     init i = error "ASyn init no implemented"
+    init' f _ = AExp (Init f)
     arr' f _ = AExp (Arr f)
 {-
 --ArrowChoice only requires definition for 'left', but the default implementation
@@ -127,8 +127,8 @@ normE = everywhere normalize
 -- normOpt returns the pair of state and pure function as (i, f) from optimized
 -- CCNF in the form loopD i (arr f).
 
-normOpt :: AExp -> ExpQ      -- returns a pair of state and pure function (s, f)
-normOpt e =
+normOpt :: ASyn m a b -> ExpQ      -- returns a pair of state and pure function (s, f)
+normOpt (AExp e) =
   case normE e of
     LoopD i f -> tupE [i, f]
     Arr f     -> [| ( (), $(f) ) |]
@@ -142,7 +142,7 @@ normOpt e =
 pprNorm :: AExp -> Q Exp
 pprNorm = ppr' . norm
 
-pprNormOpt :: AExp -> Q Exp
+pprNormOpt :: ASyn m a b -> Q Exp
 pprNormOpt = ppr' . normOpt
 ppr' :: Q Exp -> Q Exp
 ppr' e = runQ (fmap toLet e) >>= litE . StringL . simplify . pprint

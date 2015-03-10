@@ -16,12 +16,17 @@ import Examples
 t1 (AExp x) = x
 main :: IO ()
 main = do
-    print $ show temp2
-    let a =  [arrowTH|
-        \(Just a) -> (a,a,a)
+    --print $ show temp2
+    let a@(AExp b) =  [arrowTH|
+        proc n -> do
+            g <- arr (+3) -< 10*n
+            rec let z = g+n
+                y <- arr (+1) -< z
+            returnA -< y
         |]
-        in print $ a (Just 3)
+        in print $ a
     print "hi"
+
 runCCNF :: e -> ((b, e) -> (c, e)) -> [b] -> [c]
 runCCNF i f = g i
         where

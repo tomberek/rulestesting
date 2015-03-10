@@ -20,3 +20,4 @@ excluded-modules:
 - Auto.hs
 - Control/Arrow/Init/Normalize.hs
 - Control/Arrow/Init/TH.hs
+- Language/Haskell/TH/Raise.hs

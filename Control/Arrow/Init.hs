@@ -11,6 +11,8 @@ import Prelude hiding (init)
 
 class (Arrow a, ArrowLoop a) => ArrowInit a where
   init :: b -> a b b
+  init' :: ExpQ -> b -> a b b
+  init' _ = init
   arr' :: ExpQ -> (b->c) -> a b c
   arr' _ = arr
   loopD :: e -> ((b, e) -> (c, e)) -> a b c
