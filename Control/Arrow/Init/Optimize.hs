@@ -8,7 +8,7 @@ module Control.Arrow.Init.Optimize
   (norm, normOpt,fromAExp, normalize, normE,
    pprNorm, pprNormOpt, printCCA, ASyn(..),AExp(..),ArrowInit(..),
    cross, dup, swap, assoc, unassoc, juggle, trace, mirror, untag, tagT, untagT,
-   swapE, dupE,lowerTH) where
+   swapE, dupE) where
 
 import Control.Category
 import Prelude hiding ((.), id, init)
@@ -19,6 +19,7 @@ import Data.Char (isAlpha)
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax
 import Data.Generics.Uniplate.Data
+import Unsafe.Coerce
 
 
 import qualified Data.Generics as G (everywhere, mkT)
@@ -65,8 +66,9 @@ instance Category (ASyn m) where
     id = AExp (Arr [| id |])
     AExp g . AExp f = AExp (f :>>> g)
 instance Arrow (ASyn m) where
-    arr _ = error "ASyn arr not implemented"
+    arr f = error $ "ASyn arr not implemented" -- ++ (show ( ((unsafeCoerce f)::(Int,Int)->(Int,Int)) ((2::Int,3::Int))))
     first (AExp f) = AExp (First f)
+    second (AExp f) = AExp (Arr swapE :>>> First f :>>> Arr swapE)
     (AExp f) *** (AExp g) = AExp (f :*** g)
 instance ArrowLoop (ASyn m) where
     loop (AExp f) = AExp (Loop f)
@@ -158,29 +160,6 @@ fromAExp (Init i) = appE [|init|] i
 fromAExp (Lft f) = appE [|left|] (fromAExp f)
 fromAExp (f :*** g) = infixE (Just (fromAExp f)) [|(***)|] (Just (fromAExp g))
 
-lowerTH :: Exp -> Exp
-lowerTH = rewrite arg
-    where
-        arg (VarE (Name (OccName "Arr") _)) = Just $ VarE (Name (OccName "arr") NameS)
-        arg (VarE (Name (OccName ":>>>") _)) = Just $ VarE (Name (OccName ">>>") NameS)
-        {-
-        arg (AppE (E.Var (E.UnQual (E.Ident "arr"))) b) = Just $ arrFun b
-        arg (E.App (E.Var (E.UnQual (E.Symbol "arr"))) b) = Just $ arrFun b
-        arg (E.App (E.Var (E.Qual _ (E.Symbol "arr"))) b) = Just $ arrFun b
-        arg (E.App (E.Var (E.Qual _ (E.Ident "arr"))) b) = Just $ arrFun b
-        arg (E.App (E.Var (E.UnQual (E.Ident "init"))) b) = Just $ app (var (name "Init")) b
-        arg (E.App (E.Var (E.UnQual (E.Symbol "init"))) b) = Just $ app (var (name "Init")) b
-        arg (E.App (E.Var (E.Qual _ (E.Symbol "init"))) b) = Just $ app (var (name "Init")) b
-        arg (E.App (E.Var (E.Qual _ (E.Ident "init"))) b) = Just $ app (var (name "Init")) b
-        arg (E.Var (E.UnQual (E.Ident "returnA"))) = Just $ arrFun (var $ name "id")
-        arg (E.Var (E.UnQual (E.Symbol "returnA"))) = Just $ arrFun (var $ name "id")
-        arg (E.Var (E.Qual _ (E.Ident "returnA"))) = Just $ arrFun (var $ name "id")
-        arg (E.Var (E.Qual _ (E.Symbol "returnA"))) = Just $ arrFun (var $ name "id")
-        arg (E.InfixApp leftExp (E.QVarOp (E.UnQual (E.Symbol ">>>"))) rightExp ) = Just $ infixApp leftExp (op $ name ":>>>") rightExp
-        --arg (E.InfixApp leftExp (E.QVarOp (E.UnQual (E.Symbol "<<<"))) rightExp ) = Just $ infixApp rightExp (op $ name ":>>>") leftExp
-        --arg (E.InfixApp leftExp (E.QVarOp (E.UnQual (E.Symbol "***"))) rightExp ) = Just $ infixApp leftExp (op $ name ":***") rightExp
-        -}
-        arg _ = Nothing
 
 -- CCNF
 -- ====

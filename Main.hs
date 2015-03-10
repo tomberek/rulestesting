@@ -27,8 +27,8 @@ main = do
     print $ show a
     ---}
     print $ (example1 :: ASyn m Int Int)
-    let d@(AExp c) = $(norm example1)
-    print $ d
+    let a = $(norm example1)
+    print $ a 3
     print "hi"
 
 runCCNF :: e -> ((b, e) -> (c, e)) -> [b] -> [c]

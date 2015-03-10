@@ -26,7 +26,7 @@ parseArrow = E.parseExpWithMode arrowParseMode
 arrow :: QuasiQuoter
 arrow = QuasiQuoter {
     quoteExp = \input -> case parseArrow input of
-        E.ParseOk result -> desugarProc result
+        E.ParseOk result -> desugarProc result >>= arrFixer
         --ParseOk result -> normToExp [] result
         E.ParseFailed l err -> error $ show l ++ show err
   , quotePat = error "cannot be patterns."
@@ -51,6 +51,10 @@ arrFixer = rewriteM arg
             fmap Just [| init' (returnQ $(lift expr)) $(returnQ expr) |]
         arg (VarE (Name (OccName "returnA") _)) =
             fmap Just [| arr' (returnQ $([| id |] >>= lift)) id |]
+        {-arg (AppE (AppE (VarE (Name (OccName "loopD") _)) expr2) expr) =
+              fmap Just [| loop (arr' (returnQ $(lift expr)) $(returnQ expr) >>>
+                            second (init' (returnQ $(lift expr2)) $(returnQ expr2))) |]
+        -}
         arg _ = return Nothing
 
 

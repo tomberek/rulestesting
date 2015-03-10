@@ -10,8 +10,7 @@ example1 = [arrowTH|
     proc n -> do
         a  <- arr (\x -> x) -< (n::Int)
         rec
-            e <- init 1 -< a + (1::Int)
-            g <- init 10 -< e
+            e <- arr (+1) -< a + (1::Int)
         returnA -< a
     |]
 
