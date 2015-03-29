@@ -37,7 +37,7 @@ getURLSum :: (M a ~ IO,ArrowInit a) => a String Int
 getURLSum = [arrowInit| (arrM processURL) >>> (arr length) |]
 
 line2 :: (M a ~ IO, ArrowInit a) => a (String,String) (Int)
-line2 = [arrowG|
+line2 = [arrowInit|
     proc (x,y) -> do
     a <- getURLSum -< x
     b <- getURLSum -< y
