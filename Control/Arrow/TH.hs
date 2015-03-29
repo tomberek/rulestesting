@@ -1,62 +1,129 @@
-{-# LANGUAGE ImpredicativeTypes #-}
-{-# LANGUAGE LiberalTypeSynonyms #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE ViewPatterns #-}
--- Thomas Bereknyei 2015
-module Control.Arrow.TH where
+{- |
+Module      :  Control.Arrow.TH
+Description :  Arrow notation QuasiQuoter
+Copyright   :  (c) 2015 Thomas Bereknyei
+License     :  BSD3
+Maintainer  :  Thomas Bereknyei <tomberek@gmail.com>
+Stability   :  unstable
+Portability :  TemplateHaskell,QuasiQuotes,ViewPatterns
+
+-}
+module Control.Arrow.TH (arrow,arrowInit,arrowG,arrFixer) where
 import qualified Language.Haskell.Exts as E
 import Language.Haskell.Meta
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax
 
 import Language.Haskell.TH.Quote
-import Data.Generics.Uniplate.Operations
+import Data.Generics.Uniplate.DataOnly
 import Control.Arrow.Init
 import Control.Arrow
-import Control.Arrow.Init.Optimize
 import Data.List (mapAccumL)
+import Data.Graph
+import Data.Function
+import Language.Haskell.TH.Utilities
+import qualified Data.Set as Set
+import Data.Maybe
 
+type ArrowExp = E.Exp
+-- | A 'QuasiQuoter' that desugars proc-do notation.
+arrowG :: QuasiQuoter
+arrowG = arrowInit{
+    quoteExp = \input -> case parseArrow input of
+        E.ParseOk result -> error $ show $ topSort $ process [] result
+        E.ParseFailed l err -> error $ show l ++ show err}
+
+data Node where
+    ProcN :: Int -> E.Pat -> Node
+    StmtN :: Int -> E.Pat -> E.Exp -> ArrowExp -> Node
+    CmdN  :: Int -> E.Exp -> ArrowExp -> Node
+newtype P = P Node
+instance Eq Node where
+    (==) = (==) `on` getId
+instance Ord Node where
+    compare = compare `on` getId
+
+process ps (E.Proc a b c) = process (ProcN 0 b:ps) c
+process ps (E.Do statements) = buildGr $ ps ++ (snd $ mapAccumL makeNodes 1 statements)
+    where
+        makeNodes i (E.Generator _ p (E.LeftArrApp e1 e2)) = (i+1,StmtN i p e2 e1)
+        makeNodes i (E.Qualifier (E.LeftArrApp e1 e2)) = (i+1,CmdN i e2 e1)
+
+groupNodes :: [Int] -> [Node] -> [[Node]]
+groupNodes (n:ns) nodes = undefined
+
+getId (ProcN i _)=i
+getId (StmtN i _ _ _)=i
+getId (CmdN i _ _) = i
+
+buildGr :: [Node] -> Graph
+buildGr n = buildG (0,length n - 1) $ makeEdges n
+makeEdges :: [Node] -> [Edge]
+makeEdges [] = []
+makeEdges (n:ns) = (makeEdges ns) ++ (catMaybes $ map (makeEdge (freeVars $ P n) (getId n)) ns)
+
+makeEdge :: Set.Set E.Name -> Int -> Node -> Maybe Edge
+makeEdge names i node = if Set.null f then Nothing else Just (i,getId node)
+    where
+          f = names `Set.intersection` (freeVars node)
+
+instance FreeVars Node where
+    freeVars (StmtN _ _ e _) = freeVars e
+    freeVars (CmdN _ e _) = freeVars e
+instance FreeVars P where
+    freeVars (P (ProcN _ p)) = freeVars p
+    freeVars (P (StmtN _ p _ _)) = freeVars p
+    freeVars (P (CmdN _ p _)) = Set.empty
+
+-- proc = C C
+-- cmd = O O
+-- cstmt = O C
+-- pat = C O
+
+-- | For CMD, e: O=, C=there is a pattern
 
 arrowParseMode :: E.ParseMode
 arrowParseMode = E.defaultParseMode{E.extensions=[E.EnableExtension E.Arrows]}
 parseArrow :: String -> E.ParseResult E.Exp
 parseArrow = E.parseExpWithMode arrowParseMode
 
-arrow :: QuasiQuoter
-arrow = QuasiQuoter {
+-- | A 'QuasiQuoter' that desugars proc-do notation and prepares for
+-- CCA optimization via `arr'` and `init'` usage.
+arrowInit :: QuasiQuoter
+arrowInit = QuasiQuoter {
     quoteExp = \input -> case parseArrow input of
         E.ParseOk result -> desugarProc result >>= arrFixer
-        --ParseOk result -> normToExp [] result
         E.ParseFailed l err -> error $ show l ++ show err
   , quotePat = error "cannot be patterns."
   , quoteDec = error "cannot be declarations."
   , quoteType = error "cannot be types."
   }
-arrowTH :: QuasiQuoter
-arrowTH = arrow{quoteExp = \input -> case parseArrow input of
-    --E.ParseOk result -> desugarProc result >>= arrFixer
-    E.ParseOk result ->  do
-        f <- desugarProc result >>= arrFixer
-        --error $ show f
-        return f
-    E.ParseFailed l err -> error $ show l ++ show err}
+-- | A 'QuasiQuoter' that desugars proc-do notation.
+arrow :: QuasiQuoter
+arrow = arrowInit{
+    quoteExp = \input -> case parseArrow input of
+        E.ParseOk result -> desugarProc result
+        E.ParseFailed l err -> error $ show l ++ show err}
 
+-- | Replaces expressions of `arr`, `arrM`, `init`, and `returnA` with
+-- the versions that have their arguments lifted to TH.
 arrFixer :: Exp -> ExpQ
 arrFixer = rewriteM arg
     where
         arg (AppE (VarE (Name (OccName "arr") _)) expr) =
             fmap Just [| arr' (returnQ $(lift expr)) $(returnQ expr) |]
+        arg (AppE (VarE (Name (OccName "arrM") _)) expr) =
+            fmap Just [| arrM' (returnQ $(lift expr)) $(returnQ expr) |]
         arg (AppE (VarE (Name (OccName "init") _)) expr) =
             fmap Just [| init' (returnQ $(lift expr)) $(returnQ expr) |]
         arg (VarE (Name (OccName "returnA") _)) =
             fmap Just [| arr' (returnQ $([| id |] >>= lift)) id |]
-        {-arg (AppE (AppE (VarE (Name (OccName "loopD") _)) expr2) expr) =
-              fmap Just [| loop (arr' (returnQ $(lift expr)) $(returnQ expr) >>>
-                            second (init' (returnQ $(lift expr2)) $(returnQ expr2))) |]
-        -}
         arg _ = return Nothing
-
 
 type Stack = (Pat,[Pat])
 (-:-) :: t -> (a, [a]) -> (t, [a])
@@ -86,7 +153,6 @@ tupleS :: Stack -> PatQ
 tupleS (s,[]) = returnQ s
 tupleS (s,ss) = returnQ $ TupP [s,TupP ss]
 
-
 promoted :: Stack -> ExpQ
 promoted (trim -> (s,ss)) = tupE $ map (returnQ . promote) $ (s:ss)
 
@@ -103,13 +169,13 @@ promote x = error $ "pattern promotion TODO" ++ show x
 
 desugarProc :: E.Exp -> ExpQ
 desugarProc (E.Proc _ (returnQ . toPat -> pat) (E.LeftArrApp (desugarProc -> expr1) (desugarProc -> expr2))) =
-    arrTH (lamE [pat] expr2) >:> expr1 -- special case
+    [| arr $(lamE [pat] expr2) >>> $expr1 |] -- special case
 desugarProc (E.Proc _ pat expr) = cmdToTH (toPat pat,[]) expr
 desugarProc (E.Paren expr) = parensE $ desugarProc expr
 desugarProc expr = returnQ $ toExp expr
 
 cmdToTH :: Stack -> E.Exp -> ExpQ
-cmdToTH stack p@(E.Proc _ pat expr) = desugarProc p
+cmdToTH stack (E.Proc _ (toPat -> pat) expr) = cmdToTH (pat -:- stack) expr --desugarProc p
 cmdToTH stack (E.Do statements) = [| $(foldl1 (>:>) expressions) >>> arr fst |]
     where (_,expressions) = mapAccumL stmtToTH stack $ statements
 cmdToTH stack (E.LeftArrApp (desugarProc -> expr) (desugarProc -> expr2)) =
@@ -148,7 +214,7 @@ stmtToTH stack (E.RecStmt statements) = (trimAll $ collectedPats -::- stack,exps
 
 -- | Backwards binary operator for use in stmtToTH.RecStmt
 (*:*) :: ExpQ -> ExpQ -> ExpQ
-y *:* x = [| first $x >>> arr $swapE >>> first $y >>> arr $swapE |]
+y *:* x = [| first $x >>> arr (\(a,b)->(b,a)) >>> first $y >>> arr (\(a,b)->(b,a)) |] --used swapE
 
 partitionStack :: [Pat] -> Pat
 partitionStack [s] = s

@@ -1,39 +1,48 @@
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE ViewPatterns #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE KindSignatures #-}
-{-# LANGUAGE CPP, TemplateHaskell, FlexibleInstances #-}
--- originally from CCA package: https://hackage.haskell.org/package/CCA-0.1.5.2
+{-# LANGUAGE GADTs                 #-}
+{-# LANGUAGE KindSignatures        #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE TemplateHaskell       #-}
+{-# LANGUAGE TypeFamilies          #-}
+{- |
+Module      :  Control.Arrow.Init.Optimize
+Description :  Optimize ArrowInit Instances
+Copyright   :  (c) 2015 Thomas Bereknyei
+License     :  BSD3
+Maintainer  :  Thomas Bereknyei <tomberek@gmail.com>
+Stability   :  unstable
+Portability :  GADTs,TemplateHaskell,MultiParamTypesClasses
+
+Originally from CCA package: <https://hackage.haskell.org/package/CCA-0.1.5.2>
+-}
 module Control.Arrow.Init.Optimize
-  (norm, normOpt,fromAExp, normalize, normE,
-   pprNorm, pprNormOpt, printCCA, ASyn(..),AExp(..),ArrowInit(..),
-   cross, dup, swap, assoc, unassoc, juggle, trace, mirror, untag, tagT, untagT,
-   swapE, dupE) where
+    (norm, normOpt, normFixed, fromAExp, normalize, normE,
+    runCCNF, nth', runIt,
+    pprNorm, pprNormOpt, printCCA, ASyn(..),AExp(..),ArrowInit(..),
+    --cross, dup, swap, assoc, unassoc, juggle, trace, mirror, untag, tagT, untagT,
+    --swapE, dupE
+    ) where
 
-import Control.Category
-import Prelude hiding ((.), id, init)
+import           Control.Category
+import           Prelude             hiding (id, init, (.))
 
-import Control.Arrow
-import Control.Arrow.Init
-import Data.Char (isAlpha)
-import Language.Haskell.TH
-import Language.Haskell.TH.Syntax
-import Data.Generics.Uniplate.Data
-import Unsafe.Coerce
+import           Control.Arrow
+import           Control.Arrow.Init
+import           Control.Arrow.TH
+import           Control.Monad       (liftM)
+import           Data.Char           (isAlpha)
+import           Language.Haskell.TH
 
-
-import qualified Data.Generics as G (everywhere, mkT)
+import qualified Data.Generics       as G (everywhere, mkT)
 -- Internal Representation
 -- =======================
 
--- We use AExp to syntactically represent an arrow for normalization purposes. 
-
+-- We use AExp to syntactically represent an arrow for normalization purposes.
 data AExp
   = Arr ExpQ
   | First AExp
   | AExp :>>> AExp
 
-  -- | Effect ExpQ
+  | ArrM ExpQ -- added to allow arrows with side effects
 
   | AExp :*** AExp -- added to prevent premature optimization? or to allow it?
 
@@ -48,7 +57,7 @@ infixl 1 :***
 instance Show AExp where
     show (Arr _) = "Arr"
     show (First f) = "First " ++ show f
-    --show (Effect _) = "Effect"
+    show (ArrM _) = "ArrM"
     show (f :>>> g) = "(" ++ show f ++ " >>> " ++ show g ++ ")"
     show (f :*** g) = "[" ++ show f ++ " *** " ++ show g ++ "]"
     show (Loop f) = "Loop " ++ show f
@@ -59,24 +68,26 @@ instance Show (ASyn m a b) where
     show (AExp x) = show x
 
 -- We use phantom types to make ASyn an Arrow.
-
-newtype ASyn (m :: * -> * ) b c = AExp AExp
+newtype ASyn (m :: * -> *) b c = AExp AExp
 
 instance Category (ASyn m) where
     id = AExp (Arr [| id |])
     AExp g . AExp f = AExp (f :>>> g)
 instance Arrow (ASyn m) where
-    arr f = error $ "ASyn arr not implemented" -- ++ (show ( ((unsafeCoerce f)::(Int,Int)->(Int,Int)) ((2::Int,3::Int))))
+    arr _ = error $ "ASyn arr not implemented"
     first (AExp f) = AExp (First f)
     second (AExp f) = AExp (Arr swapE :>>> First f :>>> Arr swapE)
     (AExp f) *** (AExp g) = AExp (f :*** g)
+    (AExp f) &&& (AExp g) = AExp (Arr dupE :>>> f :*** g)
 instance ArrowLoop (ASyn m) where
     loop (AExp f) = AExp (Loop f)
 instance ArrowInit (ASyn m) where
+    arr' f _ = AExp (Arr f)
     init _ = error "ASyn init not implemented"
     init' f _ = AExp (Init f)
-    arr' f _ = AExp (Arr f)
-{-
+    type M (ASyn m) = m  -- Not in original CCA. 2015-TB
+    arrM' f _ = AExp (ArrM f)
+    arrM _ = error "ASyn arrM not implemented"
 --ArrowChoice only requires definition for 'left', but the default implementation
 --for 'right' and '|||' uses arr so we need to redefine them using arr' here.
 --'+++' is also redefined here for completeness.
@@ -85,23 +96,15 @@ instance Monad m => ArrowChoice (ASyn m) where
     right f = arr' [| mirror |] mirror >>> left f >>> arr' [| mirror |] mirror
     f +++ g = left f >>> right g
     f ||| g = f +++ g >>> arr' [| untag |] untag
---}
--- Pretty printing AExp.
 
+-- Pretty printing AExp.
 printCCA :: ASyn m t t1 -> IO ()
 printCCA (AExp x) = printAExp x
 printAExp :: AExp -> IO ()
 printAExp x = runQ (fromAExp x) >>= putStrLn . simplify . pprint
-simplify :: String -> String
-simplify = unwords . map (unwords . map aux . words) . lines
-  where aux (c:x) | not (isAlpha c) = c : aux x
-        aux x = let (_, v) = break (=='.') x
-                in if length v > 1 then aux (tail v)
-                                   else x
 
 -- Traversal over AExp is defined in terms of imap (intermediate map)
 -- and everywhere.
-
 type Traversal = AExp -> AExp
 imap :: Traversal -> Traversal
 imap h (First f) = First (h f)
@@ -118,54 +121,41 @@ everywhere h = h . imap (everywhere h)
 
 -- norm is a TH function that normalizes a given CCA, e.g., $(norm e) will
 -- give the CCNF of e.
-
 norm :: ASyn m a b -> ExpQ         -- returns a generic ArrowInit arrow
 norm (AExp e) = fromAExp (normE e)
 normE :: Traversal
 normE = everywhere normalize
 
+normFixed :: ASyn m a b -> ExpQ
+normFixed f = norm f >>= arrFixer
 -- normOpt returns the pair of state and pure function as (i, f) from optimized
 -- CCNF in the form loopD i (arr f).
-
 normOpt :: ASyn m a b -> ExpQ      -- returns a pair of state and pure function (s, f)
 normOpt (AExp e) =
   case normE e of
     LoopD i f -> tupE [i, f]
     Arr f     -> [| ( (), $(f) ) |]
-    --Effect f  -> [| ( (), $(f) ) |]
-    g -> error $ "Perhaps not causual? Can't optimize past: " ++ show g
+    ArrM f  -> [| ( (), $(f) ) |]
+    g -> [| ( (), $(fromAExp g) ) |]
+    --g -> error $ "Perhaps not causual? Can't optimize past: " ++ show g
     -- _         -> error $ "The given arrow can't be normalized to optimized CCNF."
 
--- pprNorm and pprNormOpt return the pretty printed normal forms as a
--- string.
-
-pprNorm :: ASyn m a b -> Q Exp
-pprNorm = ppr' . norm
-
-pprNormOpt :: ASyn m a b -> Q Exp
-pprNormOpt = ppr' . normOpt
-ppr' :: Q Exp -> Q Exp
-ppr' e = runQ (fmap toLet e) >>= litE . StringL . simplify . pprint
-
--- fromAExp converts AExp back to TH Exp structure.
-
+-- | fromAExp converts AExp back to TH Exp structure.
 fromAExp :: AExp -> ExpQ
 fromAExp (Arr f) = appE [|arr|] f
 fromAExp (First f) = appE [|first|] (fromAExp f)
 fromAExp (f :>>> g) = infixE (Just (fromAExp f)) [|(>>>)|] (Just (fromAExp g))
 fromAExp (Loop f) = appE [|loop|] (fromAExp f)
 fromAExp (LoopD i f) = appE (appE [|loopD|] i) f
---fromAExp (Effect i) = appE [|arrM|] i
+fromAExp (ArrM i) = appE [|arrM|] i
 fromAExp (Init i) = appE [|init|] i
 fromAExp (Lft f) = appE [|left|] (fromAExp f)
-fromAExp (f :*** g) = infixE (Just (fromAExp f)) [|(***)|] (Just (fromAExp g))
-
+fromAExp (f :*** g) = infixE (Just (fromAExp f)) [|(***)|] (Just (fromAExp g)) -- Not in original CCA. 2015-TB
 
 -- CCNF
 -- ====
 
 -- Arrow laws:
-
 normalize :: AExp -> AExp
 normalize (Arr f :>>> Arr g) = Arr (g `o` f)
 normalize (First (Arr f)) = Arr (f `crossE` idE)
@@ -176,29 +166,34 @@ normalize (LoopD i f :>>> LoopD j g) = LoopD (tupE [i,j])
 normalize (Loop (LoopD i f)) = LoopD i (traceE (juggleE `o` f `o` juggleE))
 normalize (First (LoopD i f)) = LoopD i (juggleE `o` (f `crossE` idE) `o` juggleE)
 normalize (Init i) = LoopD i swapE
-
+normalize (Arr f :>>> ArrM g) = ArrM [| $g . $f |]
+normalize (ArrM f :>>> Arr g) = ArrM [| liftM $g . $f |]
+normalize (Loop (Arr f)) = Arr (traceE f) -- Not in original CCA. 2015-TB
 -- Choice:
-
 normalize (Lft (Arr f)) = Arr (lftE f)
 normalize (Lft (LoopD i f)) = LoopD i (untagE `o` lftE f `o` tagE)
-
 -- All the other cases are unchanged.
-
 normalize e = e
 
--- To Let-Expression
--- =================
+-- | Used to take the function produced by normOpt and process a stream.
+-- TODO: explain various arguments, state etc.
+runCCNF :: e -> ((b, e) -> (c, e)) -> [b] -> [c]
+runCCNF i f = g i
+        where
+            g _ [] = []
+            g j (x:xs) = let (y, j') = f (x, j)
+                            in y : g j' xs
 
--- Transform function applications to let-expressions.
-
---   (\x -> e1) e2  === let x = e2 in e1
-
-toLet :: Exp -> Exp
-toLet = G.everywhere (G.mkT aux)
+-- | Runs the output function of normOpt and runs it n times.
+nth' :: Int -> (b, ((), b) -> (a, b)) -> a
+nth' n (i, f) = aux n i
   where
-    aux (AppE (LamE [pat] body) arg) = LetE [ValD pat (NormalB arg) []] body
-    aux (AppE (LamE (pat:ps) body) arg) = LamE ps (LetE [ValD pat (NormalB arg) []] body)
-    aux x = x
+    aux m j = x `seq` if m == 0 then x else aux (m-1) j'
+      where (x, j') = f ((), j)
+
+-- | Runs the output function of normOpt once.
+runIt :: t -> (b, ((), b) -> (a, b)) -> a
+runIt _ = nth' 0
 
 -- Auxiliary Functions
 -- ===================
@@ -254,3 +249,31 @@ traceE,lftE :: ExpQ -> ExpQ
 traceE = appE [|trace|]
 lftE = appE [|lft|]
 
+-- pprNorm and pprNormOpt return the pretty printed normal forms as a
+-- string.
+pprNorm :: ASyn m a b -> Q Exp
+pprNorm = ppr' . norm
+
+pprNormOpt :: ASyn m a b -> Q Exp
+pprNormOpt = ppr' . normOpt
+ppr' :: Q Exp -> Q Exp
+ppr' e = runQ (fmap toLet e) >>= litE . StringL . simplify . pprint
+
+simplify :: String -> String
+simplify = unwords . map (unwords . map aux . words) . lines
+  where aux (c:x) | not (isAlpha c) = c : aux x
+        aux x = let (_, v) = break (=='.') x
+                in if length v > 1 then aux (tail v)
+                                   else x
+
+-- To Let-Expression
+-- =================
+
+-- Transform function applications to let-expressions.
+--   (\x -> e1) e2  === let x = e2 in e1
+toLet :: Exp -> Exp
+toLet = G.everywhere (G.mkT aux)
+  where
+    aux (AppE (LamE [pat] body) arg) = LetE [ValD pat (NormalB arg) []] body
+    aux (AppE (LamE (pat:ps) body) arg) = LamE ps (LetE [ValD pat (NormalB arg) []] body)
+    aux x = x

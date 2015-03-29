@@ -1,51 +1,38 @@
+{-# LANGUAGE QuasiQuotes     #-}
 {-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE QuasiQuotes #-}
 module Main where
 
-import Control.Category
-import Prelude hiding (id,(.))
+import           Control.Category
+import           Prelude                     hiding (id, (.))
 
-import Control.Arrow.TH
-import Control.Arrow.Init.Optimize
-
-import Examples
+--import           Auto
+import           Control.Arrow
+import           Control.Arrow.Init
+import           Control.Arrow.Init.Optimize
+import           Control.Arrow.TH
+import           Examples
 --import qualified Arrow as A
 
 main :: IO ()
 main = do
-    --print $ show temp2
     {-
-    let (a,b) = $(normOpt [arrowTH|
-        proc n -> do
-            rec let z = n
-                    b = 0
-                    p = 5
-                y <- init 2 -< b
-            returnA -< y
-        |] )
-    print $ show $ b (10,2)
-    print $ show a
+    let a =(example1 :: ASyn m Int Int)
+    let b = $(norm example1)
+    let (AExp c) = $(norm example1 >>= arrFixer)
+    printCCA a
+    print $ b 3
+    print $(pprNorm example1)
+    print c
     ---}
-    print $ (example1 :: ASyn m Int Int)
-    let a = $(norm example1)
-    print $ a 3
+    printCCA line2
+    printCCA $(normFixed line2)
+    --let a = $(norm line2)
+    let (_,b) = $(normOpt line2) :: ( (), PKleisli (String,String) Int)
+    print $(pprNorm line2)
+    --runAutoIO_ a ("http://www.google.com","http://www.cnn.com") >>= print . show
+    (runKleisli . runPKleisli) b ("http://www.google.com","http://www.cnn.com") >>= print . show
     print "hi"
 
-runCCNF :: e -> ((b, e) -> (c, e)) -> [b] -> [c]
-runCCNF i f = g i
-        where
-            g _ [] = []
-            g j (x:xs) = let (y, j') = f (x, j)
-                            in y : g j' xs
-
-nth' :: Int -> (b, ((), b) -> (a, b)) -> a
-nth' n (i, f) = aux n i
-  where
-    aux m j = x `seq` if m == 0 then x else aux (m-1) j'
-      where (x, j') = f ((), j)
-
-runIt :: t -> (b, ((), b) -> (a, b)) -> a
-runIt _ = nth' 0
 {-}
 exampleOpt :: (Int, ((), Int) -> (Int, Int))
 exampleOpt = [arrowOpt|

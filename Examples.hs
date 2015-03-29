@@ -1,12 +1,51 @@
+{-# LANGUAGE Arrows          #-}
+{-# LANGUAGE QuasiQuotes     #-}
 {-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE TypeFamilies    #-}
 module Examples where
-import Control.Arrow.TH
-import Control.Arrow.Init.Optimize
-import Control.Arrow
+import           Control.Arrow.Init.Optimize
+import           Control.Arrow.TH
 
+import           Control.Applicative
+import           Control.Arrow
+
+import           Control.Concurrent          (threadDelay)
+import           Data.Time
+import           Network.HTTP
+{--
+line1 :: (M a ~ IO,ArrowInit a) => a (String, String) ()
+line1 = [arrowInit| proc (n,g) -> do
+    a <- getURLSum -< n
+    d <- getURLSum -< g
+    b <- arr length -< n
+    c <- arrM (\input -> do
+               print input
+               print ":"
+               read <$> getLine) -< n
+    _ <- arrM print -< a + c + d
+    returnA -< ()
+    |]
+--}
+processURL :: String -> IO String
+processURL a = do
+    getCurrentTime >>= print
+    threadDelay 1000000
+    response <- simpleHTTP (getRequest a)
+    getResponseBody response
+
+getURLSum :: (M a ~ IO,ArrowInit a) => a String Int
+getURLSum = [arrowInit| (arrM processURL) >>> (arr length) |]
+
+line2 :: (M a ~ IO, ArrowInit a) => a (String,String) (Int)
+line2 = [arrowG|
+    proc (x,y) -> do
+    a <- getURLSum -< x
+    b <- getURLSum -< y
+    returnA -< a + b
+    |]
+{-
 example1 :: ArrowInit a => a Int Int
-example1 = [arrowTH|
+example1 = [arrowInit|
     proc n -> do
         a  <- arr (\x -> x) -< (n::Int)
         rec
@@ -15,9 +54,8 @@ example1 = [arrowTH|
     |]
 
 
-{-
 example4 :: ArrowInit a => a Int Int
-example4 = [arrow|
+example4 = [arrowInit|
      proc n -> do
         a <- arr (+1) -< n
         returnA -< n
@@ -27,25 +65,26 @@ example4 = [arrow|
             |]
 
 example2 :: ArrowInit a => a Int Int
-example2 = [arrowTH|
+example2 = [arrowInit|
     proc n -> do
         returnA -< 10*n
     |]
 temp2 :: ASyn m Int Int
-temp2 = [arrowTH| arr (\a -> (a+3)) >>> arr (+2) |]
+temp2 = [arrowInit| arr (\a -> (a+3)) >>> arr (+2) |]
 
 example0 :: ArrowInit a => a Int Int
-example0 = [arrowTH|proc n -> arr (+1) -< n+2 |]
+example0 = [arrowInit|proc n -> arr (+1) -< n+2 |]
 
 
 example3 :: Int -> Int
-(_,example3) = $(normOpt [arrowTH|
+(_,example3) = $(normOpt [arrowInit|
     proc n -> arr id -< n+2
     |] )
 
+i :: Int -> Int
 i = [arrow|
     proc n -> do
-        x <- id -< n + n
+        x <- arr id -< n + n
         y <- arr (+1) -< x
         let z = x + y
         returnA -< z

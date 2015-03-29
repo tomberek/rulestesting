@@ -1,35 +1,37 @@
-{-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE RecursiveDo #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE InstanceSigs #-}
+{-# LANGUAGE Arrows                     #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE TupleSections #-}
-{-# LANGUAGE Arrows #-}
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE InstanceSigs               #-}
+{-# LANGUAGE QuasiQuotes                #-}
+{-# LANGUAGE RankNTypes                 #-}
+{-# LANGUAGE RecursiveDo                #-}
+{-# LANGUAGE TemplateHaskell            #-}
+{-# LANGUAGE TupleSections              #-}
+{-# LANGUAGE TypeFamilies               #-}
 -- http://blog.jle.im/entry/effectful-recursive-real-world-autos-intro-to-machine
 --
 -- Auto with on/off behavior and effectful stepping.
 
 module Auto where
 
-import Control.Applicative
-
-import Control.Arrow
-import Control.Arrow.Init.TH
-import Control.Category
-import Control.Monad
-import Control.Monad.Fix
-import Prelude             hiding (id,(.),init)
-import Control.Concurrent.Async
-import Network.HTTP
-import Data.Time
-import Control.Concurrent (threadDelay)
+import           Control.Applicative
+import           Control.Arrow
+import           Control.Arrow.Init
+import           Control.Arrow.Init.Optimize
+import           Control.Arrow.TH
+import           Control.Category
+import           Control.Concurrent.Async
+import           Control.Monad
+import           Control.Monad.Fix
+import           Prelude                     hiding (id, init, (.))
 
 newtype AutoXIO a b = AutoXIO {runAutoXIO :: AutoX IO a b} deriving (Functor,Applicative,Category,Alternative,ArrowChoice,ArrowLoop)
 autoIO :: (a -> IO (Maybe b, AutoX IO a b)) -> AutoXIO a b
 autoIO = AutoXIO . AConsX
 runAutoIO :: AutoXIO a b -> a -> IO (Maybe b, AutoX IO a b)
 runAutoIO = runAutoX . runAutoXIO
+runAutoIO_ :: AutoXIO a b -> a -> IO (Maybe b)
+runAutoIO_ f a = (runAutoX . runAutoXIO) f a >>= return . fst
+
 instance Arrow (AutoXIO) where
     arr :: (b -> c) -> AutoXIO b c
     arr f     = AutoXIO $ AConsX $ \b -> return (Just $ f b,arr f)
@@ -42,6 +44,11 @@ instance Arrow (AutoXIO) where
         ( (y1,a1') , (y2,a2') ) <- concurrently (runAutoIO a1 x) (runAutoIO a2 x)
         return (liftA2 (,) y1 y2, a1' &&& a2')
 
+instance ArrowInit (AutoXIO) where
+    init b = AutoXIO $ init b
+    type M AutoXIO = IO
+    arrM f = AutoXIO $ arrM f
+
 arrIO :: (a -> IO b) -> AutoXIO a b
 arrIO action = AutoXIO $ AConsX $ \a -> do
     b <- action a
@@ -51,28 +58,6 @@ arrMonad action = AConsX $ \a -> do
     b <- action a
     return (Just b,arrMonad action)
 --}
-
-
-{--
---line1 :: AutoXIO (String, String) ()
-line1 :: Arr f IO (String, String) ()
-line1 = proc (n,g) -> do
-    a <- getURLSum -< n
-    d <- getURLSum -< g
-    b <- Arr length -< n
-    c <- ArrM (\input -> do
-               print input
-               print ":"
-               read <$> getLine) -< n
-    _ <- ArrM print -< a + c + d
-    returnA -< ()
-
---line2 :: AutoXIO (String,String) (Int)
-line2 = proc (x,y) -> do
-    a <- getURLSum -< x
-    b <- getURLSum -< y
-    returnA -< a + b
----}
 
 -- | The AutoX type: Auto with on/off behavior and effectful stepping.
 newtype AutoX m a b = AConsX { runAutoX :: a -> m (Maybe b, AutoX m a b) }
@@ -85,7 +70,8 @@ testAutoM a (x:xs)  = do
 
 testAutoM_ :: Monad m => AutoX m a b -> [a] -> m [Maybe b]
 testAutoM_ a as = liftM fst $ testAutoM a as
--- | Instances
+
+-- Instances
 instance Monad m => Category (AutoX m) where
     id    = AConsX $ \x -> return (Just x, id)
     g . f = AConsX $ \x -> do
@@ -144,11 +130,12 @@ instance MonadFix m => ArrowLoop (AutoX m) where
     loop a = AConsX $ \x -> do
          rec {(Just (y, d), a') <- runAutoX a (x, d)}
          return (Just y, loop a')
-
-instance MonadFix m => ArrowInit (AutoX m) where
-    --type M (AutoX m) = m
+instance MonadFix m => ArrowInit (AutoX m) where -- added 2015 TB
     init b = AConsX $ \a -> return (Just b,init a)
-    --arrM'' = arrMonad
+    type M (AutoX m) = m
+    arrM f = aConsM $ \x -> do
+                   y <- f x
+                   return (y, arrM f)
 -- urggghh my head hurt so much trying to write this in a clean way using
 -- recursive do notation instead of explicit calls to `mfix` and `fix`.
 -- Anyone want to submit a pull request? :)
@@ -185,7 +172,7 @@ summer = sumFrom 0
     sumFrom n = aCons $ \input ->
       let s = n + input
       in  ( s , sumFrom s )
--- arrM: Converts an `a -> m b` into an always-on `AutoX` that just runs
+-- arrMM: Converts an `a -> m b` into an always-on `AutoX` that just runs
 --      the function on the input and outputs the result.  Demonstrates the
 --      usage of the `aConsM` smart constructor.
 arrMM :: Monad m => (a -> m b) -> AutoX m a b
