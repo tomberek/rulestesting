@@ -11,6 +11,7 @@ import           Control.Arrow.Init
 import           Control.Arrow.Init.Optimize
 import           Control.Arrow.TH
 import           Examples
+
 --import qualified Arrow as A
 
 main :: IO ()
