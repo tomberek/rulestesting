@@ -15,7 +15,6 @@ import qualified Data.Set                     as Set
 import           Language.Haskell.Exts.Syntax
 
 -- The set of free variables in some construct.
-
 class FreeVars a where
     freeVars :: a -> Set Name
 
