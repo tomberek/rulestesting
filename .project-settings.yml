@@ -12,10 +12,10 @@ cabal-file: project.cabal
 version: 1
 extra-packages: ! 'Hackage: auto 0.4.3.0'
 ghc-args:
-- -fdefer-type-errors
 - -fenable-rewrite-rules
 - -fno-max-relevant-binds
 excluded-modules:
+- Arrow.hs
 - Auto.hs
 - Control/Arrow/Init/Normalize.hs
 - Control/Arrow/Init/TH.hs

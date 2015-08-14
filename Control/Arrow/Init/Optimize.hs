@@ -28,7 +28,7 @@ import           Prelude             hiding (id, init, (.))
 import           Control.Arrow
 import           Control.Arrow.Init
 import           Control.Arrow.TH
-import           Control.Monad       (liftM)
+import           Control.Monad --was just liftM
 import           Data.Char           (isAlpha)
 import           Language.Haskell.TH
 
@@ -167,12 +167,14 @@ normalize (Loop (LoopD i f)) = LoopD i (traceE (juggleE `o` f `o` juggleE))
 normalize (First (LoopD i f)) = LoopD i (juggleE `o` (f `crossE` idE) `o` juggleE)
 normalize (Init i) = LoopD i swapE
 normalize (Arr f :>>> ArrM g) = ArrM [| $g . $f |]
-normalize (ArrM f :>>> Arr g) = ArrM [| liftM $g . $f |]
+normalize (ArrM f :>>> Arr g) = ArrM [| (liftM $g) . $f |]
 normalize (Loop (Arr f)) = Arr (traceE f) -- Not in original CCA. 2015-TB
+normalize (First (ArrM f)) = ArrM ( f `crossME` [|return|] ) -- Added by TOM
 -- Choice:
 normalize (Lft (Arr f)) = Arr (lftE f)
 normalize (Lft (LoopD i f)) = LoopD i (untagE `o` lftE f `o` tagE)
 -- All the other cases are unchanged.
+normalize ((f :>>> g) :>>> h) = normalize (f :>>> normalize (g :>>> h)) -- Added by TOM
 normalize e = e
 
 -- | Used to take the function produced by normOpt and process a stream.
@@ -212,6 +214,13 @@ trace :: ((t1, t2) -> (t, t2)) -> t1 -> t
 trace f x = let (y, z) = f (x, z) in y
 cross :: (t -> t2) -> (t1 -> t3) -> (t, t1) -> (t2, t3)
 cross f g (x, y) = (f x, g y)
+
+crossM :: Monad m => (t -> m t2) -> (t1 -> m t3) -> (t, t1) -> m (t2,t3)
+crossM f g (x, y) = do
+    a <- f x
+    b <- g y
+    return (a,b)
+
 mirror :: Either b a -> Either a b
 mirror (Left x) = Right x
 mirror (Right y) = Left y
@@ -235,6 +244,10 @@ o :: ExpQ -> ExpQ -> ExpQ
 f `o` g = appE (appE [|(.)|] f) g
 crossE :: ExpQ -> ExpQ -> ExpQ
 f `crossE` g = appE (appE [|cross|] f) g
+
+crossME :: ExpQ -> ExpQ -> ExpQ
+f `crossME` g = appE (appE [|crossM|] f) g
+
 idE,dupE,swapE,assocE,assocE',juggleE,tagE,untagE :: ExpQ
 idE = [|id|]
 dupE = [|dup|]

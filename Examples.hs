@@ -12,7 +12,6 @@ import           Control.Arrow
 import           Control.Concurrent          (threadDelay)
 import           Data.Time
 import           Network.HTTP
-{--
 line1 :: (M a ~ IO,ArrowInit a) => a (String, String) ()
 line1 = [arrowInit| proc (n,g) -> do
     a <- getURLSum -< n
@@ -25,7 +24,6 @@ line1 = [arrowInit| proc (n,g) -> do
     _ <- arrM print -< a + c + d
     returnA -< ()
     |]
---}
 processURL :: String -> IO String
 processURL a = do
     getCurrentTime >>= print
@@ -36,14 +34,20 @@ processURL a = do
 getURLSum :: (M a ~ IO,ArrowInit a) => a String Int
 getURLSum = [arrowInit| (arrM processURL) >>> (arr length) |]
 
-line2 :: (M a ~ IO, ArrowInit a) => a (String,String) (Int)
+line2 :: (M a ~ IO, ArrowInit a) => a (String,String) Int
 line2 = [arrowInit|
     proc (x,y) -> do
     a <- getURLSum -< x
     b <- getURLSum -< y
-    returnA -< a + b
+    returnA -< a+b
     |]
-{-
+line3 :: (M a ~ IO, ArrowInit a) => a (String,String) Int
+line3 = [arrowInit|
+    proc a -> do
+    (c,d) <- getURLSum *** getURLSum -< a
+    returnA -< c+d
+    |]
+
 example1 :: ArrowInit a => a Int Int
 example1 = [arrowInit|
     proc n -> do
@@ -81,6 +85,7 @@ example3 :: Int -> Int
     proc n -> arr id -< n+2
     |] )
 
+{-
 i :: Int -> Int
 i = [arrow|
     proc n -> do
