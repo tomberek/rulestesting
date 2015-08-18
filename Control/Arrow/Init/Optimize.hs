@@ -175,6 +175,7 @@ normalize (Lft (Arr f)) = Arr (lftE f)
 normalize (Lft (LoopD i f)) = LoopD i (untagE `o` lftE f `o` tagE)
 -- All the other cases are unchanged.
 normalize ((f :>>> g) :>>> h) = normalize (f :>>> normalize (g :>>> h)) -- Added by TOM
+normalize (f :*** g) = normalize f :*** normalize g
 normalize e = e
 
 -- | Used to take the function produced by normOpt and process a stream.
@@ -212,6 +213,11 @@ juggle :: ((t1, t), t2) -> ((t1, t2), t)
 juggle ((x, y), z) = ((x, z), y)
 trace :: ((t1, t2) -> (t, t2)) -> t1 -> t
 trace f x = let (y, z) = f (x, z) in y
+
+{-# RULES
+"cross_id_id" forall (f::forall a. a -> a) (g::forall b. b -> b) h. cross f g h = h
+ #-}
+{-# NOINLINE cross #-}
 cross :: (t -> t2) -> (t1 -> t3) -> (t, t1) -> (t2, t3)
 cross f g (x, y) = (f x, g y)
 
