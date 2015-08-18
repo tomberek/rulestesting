@@ -1,4 +1,5 @@
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE QuasiQuotes #-}
@@ -190,7 +191,11 @@ stmtToTH stack (E.LetStmt (E.BDecls d)) = (newStack,newExpression)
    where
       (newStack,exps) = mapAccumL process stack d
       newExpression = foldl1 (>:>) exps
+#if __GLASGOW_HASKELL__ <= 708
       process s pbs@(E.PatBind _ (toPat -> pat) _ _ _) =
+#else
+      process s pbs@(E.PatBind _ (toPat -> pat) _ _) =
+#endif
         ((pat -:- trim s),
             [| arr (\ $(tupleS s) ->
                       $(letE (map returnQ $ toDecs pbs)
@@ -229,7 +234,11 @@ collectRecData :: E.Stmt -> ([Pat], [ExpQ])
 collectRecData (E.Generator _ (toPat -> pat) (E.LeftArrApp _ (desugarProc -> expr))) = ([pat],[expr])
 collectRecData (E.Qualifier (E.LeftArrApp _ (desugarProc -> expr))) = ([WildP],[expr])
 collectRecData (E.LetStmt (E.BDecls decls)) = (\(a,b) -> (a,b)) $ unzip $          -- uneeded id?
+#if __GLASGOW_HASKELL__ <= 708 
     map (\(E.PatBind _ (toPat -> p) _ (E.UnGuardedRhs (desugarProc -> rhs)) _) -> (p,rhs)) decls
+#else
+    map (\(E.PatBind _ (toPat -> p) (E.UnGuardedRhs (desugarProc -> rhs)) _) -> (p,rhs)) decls
+#endif
 collectRecData (E.RecStmt stmts) = (\(a,b) -> (concat a,concat b)) $ unzip $ map collectRecData stmts
 collectRecData x = error $ "Error in collection of expressions: " ++ show x
 
@@ -239,6 +248,5 @@ collectArrows (E.Qualifier (E.LeftArrApp exp1 _)) = desugarProc exp1
 collectArrows (E.LetStmt (E.BDecls _)) = [| arr id |] -- nested? no arrows inside let statments?
 --collectArrows (E.RecStmt stmts) = _ $ map collectArrows stmts  nexted rec statements?
 collectArrows x = error $ "Error in collections of arrows: " ++ show x
-
 ---}
 ---}

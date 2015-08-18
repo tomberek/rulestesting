@@ -24,8 +24,12 @@ instance FreeVars a => FreeVars [a] where
 
 instance FreeVars Pat where
     freeVars (PVar n) = Set.singleton n
+#if __GLASGOW_HASKELL__ <= 708
     freeVars (PLit _) = Set.empty
-    -- 7.10.2 freeVars (PNeg p) = freeVars p
+    freeVars (PNeg p) = freeVars p
+#else
+    freeVars (PLit _ _) = Set.empty
+#endif
     freeVars (PInfixApp p1 _ p2) = freeVars p1 `Set.union` freeVars p2
     freeVars (PApp _ ps) = freeVars ps
     freeVars (PTuple _ ps) = freeVars ps
@@ -81,7 +85,7 @@ instance FreeVars QName where
     freeVars (UnQual v) = Set.singleton v
     freeVars _ = Set.empty
 
-#if __GLASGOW_HASKELL__ <= 784
+#if __GLASGOW_HASKELL__ <= 708
 instance FreeVars Alt where
     freeVars (Alt _ p gas decls) =
           (freeVars gas `Set.union` freeVars decls) `Set.difference`
@@ -93,11 +97,20 @@ instance FreeVars GuardedAlts where
 
 instance FreeVars GuardedAlt where
     freeVars (GuardedAlt _ e1 e2) = freeVars e1 `Set.union` freeVars e2
+#else
+instance FreeVars Alt where
+    freeVars (Alt _ p rhs binds) =
+          (freeVars rhs `Set.union` freeVars binds) `Set.difference`
+          (freeVars p `Set.union` definedVars binds)
 #endif
 
 instance FreeVars Decl where
     freeVars (FunBind ms) = freeVars ms
+#if __GLASGOW_HASKELL__ <= 708
     freeVars (PatBind _ p _ rhs decls) =
+#else
+    freeVars (PatBind _ p rhs decls) =
+#endif
           (freeVars rhs `Set.union` freeVars decls) `Set.difference`
           (freeVars p `Set.union` definedVars decls)
     freeVars _ = Set.empty
@@ -143,7 +156,11 @@ instance DefinedVars a => DefinedVars [a] where
 
 instance DefinedVars Decl where
     definedVars (FunBind (Match _ n _ _ _ _:_)) = Set.singleton n
+#if __GLASGOW_HASKELL__ <= 708
     definedVars (PatBind _ p _ _ _) = freeVars p
+#else
+    definedVars (PatBind _ p _ _) = freeVars p
+#endif
     definedVars _ = Set.empty
 
 instance DefinedVars Binds where

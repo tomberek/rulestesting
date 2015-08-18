@@ -215,9 +215,10 @@ trace :: ((t1, t2) -> (t, t2)) -> t1 -> t
 trace f x = let (y, z) = f (x, z) in y
 
 {-# RULES
-"cross_id_id" forall (f::forall a. a -> a) (g::forall b. b -> b) h. cross f g h = h
+"cross_id_id" forall (f::a -> a) (g::b -> b) . cross f g = id
  #-}
 {-# NOINLINE cross #-}
+
 cross :: (t -> t2) -> (t1 -> t3) -> (t, t1) -> (t2, t3)
 cross f g (x, y) = (f x, g y)
 

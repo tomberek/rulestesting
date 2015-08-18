@@ -29,6 +29,8 @@ library
                        ,haskell-src-exts
                        ,haskell-src-meta
                        ,aeson
+                       ,time
+                       ,HTTP
   default-language:    Haskell2010
 
 executable rulestesting
@@ -46,5 +48,7 @@ executable rulestesting
                        ,haskell-src-exts
                        ,haskell-src-meta
                        ,aeson
+                       ,time
+                       ,HTTP
   default-language:    Haskell2010
 
