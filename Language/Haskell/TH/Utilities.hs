@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 -- Miscellaneous utilities on ordinary Haskell syntax used by the arrow
 -- translator.
 
@@ -24,7 +25,7 @@ instance FreeVars a => FreeVars [a] where
 instance FreeVars Pat where
     freeVars (PVar n) = Set.singleton n
     freeVars (PLit _) = Set.empty
-    freeVars (PNeg p) = freeVars p
+    -- 7.10.2 freeVars (PNeg p) = freeVars p
     freeVars (PInfixApp p1 _ p2) = freeVars p1 `Set.union` freeVars p2
     freeVars (PApp _ ps) = freeVars ps
     freeVars (PTuple _ ps) = freeVars ps
@@ -80,6 +81,7 @@ instance FreeVars QName where
     freeVars (UnQual v) = Set.singleton v
     freeVars _ = Set.empty
 
+#if __GLASGOW_HASKELL__ <= 784
 instance FreeVars Alt where
     freeVars (Alt _ p gas decls) =
           (freeVars gas `Set.union` freeVars decls) `Set.difference`
@@ -91,6 +93,7 @@ instance FreeVars GuardedAlts where
 
 instance FreeVars GuardedAlt where
     freeVars (GuardedAlt _ e1 e2) = freeVars e1 `Set.union` freeVars e2
+#endif
 
 instance FreeVars Decl where
     freeVars (FunBind ms) = freeVars ms
