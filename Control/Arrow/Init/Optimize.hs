@@ -31,6 +31,7 @@ import           Control.Arrow.TH
 import           Control.Monad --was just liftM
 import           Data.Char           (isAlpha)
 import           Language.Haskell.TH
+import qualified Debug.Trace
 
 import qualified Data.Generics       as G (everywhere, mkT)
 -- Internal Representation
@@ -168,14 +169,15 @@ normalize (First (LoopD i f)) = LoopD i (juggleE `o` (f `crossE` idE) `o` juggle
 normalize (Init i) = LoopD i swapE
 normalize (Arr f :>>> ArrM g) = ArrM [| $g . $f |]
 normalize (ArrM f :>>> Arr g) = ArrM [| (liftM $g) . $f |]
-normalize (Loop (Arr f)) = Arr (traceE f) -- Not in original CCA. 2015-TB
+normalize (Loop (Arr f)) = Arr (traceE f) -- Not in original CCA. 2015-TB Added by TOM
+--normalize (First (ArrM f)) = ArrM ( f `crossME` [|return|] ) -- Added by TOM
 normalize (First (ArrM f)) = ArrM ( f `crossME` [|return|] ) -- Added by TOM
 -- Choice:
 normalize (Lft (Arr f)) = Arr (lftE f)
 normalize (Lft (LoopD i f)) = LoopD i (untagE `o` lftE f `o` tagE)
 -- All the other cases are unchanged.
 normalize ((f :>>> g) :>>> h) = normalize (f :>>> normalize (g :>>> h)) -- Added by TOM
-normalize (f :*** g) = normalize f :*** normalize g
+normalize (f :*** g) = normalize f :*** normalize g -- Added by TOM
 normalize e = e
 
 -- | Used to take the function produced by normOpt and process a stream.
@@ -215,10 +217,9 @@ trace :: ((t1, t2) -> (t, t2)) -> t1 -> t
 trace f x = let (y, z) = f (x, z) in y
 
 {-# RULES
-"cross_id_id" forall (f::a -> a) (g::b -> b) . cross f g = id
+"cross_id_id" forall (f::forall a. a -> a) (g::b -> b) . cross f g = Debug.Trace.trace "cross_id_id fired" id
  #-}
 {-# NOINLINE cross #-}
-
 cross :: (t -> t2) -> (t1 -> t3) -> (t, t1) -> (t2, t3)
 cross f g (x, y) = (f x, g y)
 

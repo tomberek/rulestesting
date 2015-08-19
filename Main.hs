@@ -15,15 +15,16 @@ import           Examples
 
 main :: IO ()
 main = do
-    printCCA line3
+    printCCA line2
     putStrLn ""
-    printCCA $(normFixed line3)
+    printCCA $(normFixed line2)
     putStrLn ""
-    let banana = snd $(normOpt line3)
+    let banana = snd $(normOpt line2)
     --runAutoIO_ a ("http://www.google.com","http://www.cnn.com") >>= print . show
     (runKleisli . runPKleisli) banana ("http://www.google.com","http://www.cnn.com") >>= print . show
+    (runKleisli . runPKleisli) line2 ("http://www.google.com","http://www.cnn.com") >>= print . show
     print "hi"
-    
+
 {-}
 exampleOpt :: (Int, ((), Int) -> (Int, Int))
 exampleOpt = [arrowOpt|

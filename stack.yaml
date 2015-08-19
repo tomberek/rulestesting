@@ -1,5 +1,5 @@
 flags: {}
 packages:
 - '.'
-extra-deps: [ colorize-haskell-1.0.1 ]
+extra-deps: [ colorize-haskell-1.0.1, categories-1.0.7 ]
 resolver: lts-3.0
