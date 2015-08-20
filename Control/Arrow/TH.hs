@@ -24,10 +24,11 @@ import Language.Haskell.TH.Quote
 import Data.Generics.Uniplate.DataOnly
 import Control.Arrow.Init
 import Control.Arrow
-import Data.List (mapAccumL)
+import Data.List (mapAccumL,findIndices,elemIndex,(\\),(!!),deleteFirstsBy,delete)
 import Data.Graph
 import Data.Tree
 import Data.IntMap hiding (map)
+import qualified Data.Array as A
 import Data.Function
 import Language.Haskell.TH.Utilities
 import qualified Data.Set as Set
@@ -46,8 +47,9 @@ arrowG = arrowInit{
                 ,drawForest $ (fmap (fmap show) $ dfs graph (topSort graph))
                 ,drawForest $ (fmap (fmap show) $ dfs (transposeG graph) (topSort $ transposeG graph))
                 ])
-                (go graphDFS nodes)
-                where (transposeG -> graph,nodes) = process [] result
+                -- (go graphDFS nodes)
+                go' nodes graph [0] [] >>= arrFixer
+                where (graph,nodes) = process [] result
                       graphDFS = dfs graph (topSort graph)
         E.ParseFailed l err -> error $ show l ++ show err}
 
@@ -61,13 +63,41 @@ instance Eq NodeE where
 instance Ord NodeE where
     compare = compare `on` getId
 
+data Goal = Goal {getGV::Vertex,getGE::ExpQ}
+data Expression = Expression {getEV::Vertex,getEE::ExpQ}
+instance Eq Expression where
+     (==) = (==) `on` getEV
+
+go' :: IntMap NodeE -> Graph -> [Vertex] -> [Expression] -> ExpQ
+go' mapping graph [] [Expression _ exp] = exp
+go' mapping graph goals exps = go' mapping graph newGoals newExps
+    where
+        flag a = all (flip elem (map getEV exps)) $ (transposeG graph) `access` a -- tells if a vertex is obtainable
+        flags = findIndices flag goals -- lists obtainable goals
+        (newGoals,newExps) = step (goals,exps) flags
+        step (goals',exps') [] = (goals',exps')
+        step (goals',exps') (flagged:rest) = step helper rest
+            where
+                expVs = map getEV exps'
+                helper = (Data.List.delete flagged goals' ++ newGoals,(createExp reqExps : remainingExps)    )
+                helper2 = catMaybes $ map (flip elemIndex expVs) $ (transposeG graph) `access` flagged --indeces in exps of needed exps
+                reqExps = map ((Data.List.!!) exps') helper2
+                remainingExps = (Data.List.\\) exps' reqExps
+                newGoals = graph `access` flagged
+                createExp [] = Expression flagged [| $(currentArrow mapping flagged) |]
+                createExp [Expression _ exp] = Expression flagged [| $(exp) >>> $(currentArrow mapping flagged) |]
+                -- ensure in the right order!
+                createExp more = Expression flagged [| $(foldl1 (&:&) (map getEE more)) >>> $(currentArrow mapping flagged) |]
+
+
 go :: Forest Vertex -> IntMap NodeE -> ExpQ
 go [] mapping = [| arr id |]
+go [Node a []] mapping = [| $(currentArrow mapping a) |]
 go [Node a rest] mapping = [| $(go rest mapping) >>> $(currentArrow mapping a) |]
 go [Node a rest,Node b rest2] mapping =
-    [| ( $(go rest mapping) >>> $(currentArrow mapping a) ) &&& ( $(go rest2 mapping) >>> $(currentArrow mapping b) ) |]
-
+    [|  $(go rest mapping) >>> $(currentArrow mapping a)  &&&  $(go rest2 mapping) >>> $(currentArrow mapping b)  |]
 go forest mapping = error $ unlines ["only defined for 2-branching",drawForest $ fmap (fmap show) forest]
+access b c = b A.! c
 
 process :: [NodeE] -> E.Exp -> (Graph,IntMap NodeE)
 process ps (E.Proc a b c) = process (ProcN 0 b:ps) c
@@ -86,7 +116,7 @@ getId (CmdN i _ _) = i
 currentArrow mapping a= getArrow $ mapping ! a
 getArrow (StmtN _ p e a) = returnQ $ toExp a
 getArrow (CmdN _ e a) = [|  $(returnQ $ toExp a) |]
-getArrow _ = [| id |]
+getArrow _ = [| arr id |]
 
 buildGr :: [NodeE] -> Graph
 buildGr n = buildG (0,length n - 1) $ makeEdges n
@@ -162,6 +192,8 @@ s -:- (t,ss) = (s,t:ss)
 
 arrTH :: ExpQ -> ExpQ
 arrTH = appE (varE $ mkName "arr")
+(&:&) :: ExpQ -> ExpQ -> ExpQ
+expr1 &:& expr2 = uInfixE expr1 (varE $ mkName "&&&") expr2
 (>:>) :: ExpQ -> ExpQ -> ExpQ
 expr1 >:> expr2 = uInfixE expr1 (varE $ mkName ">>>") expr2
 trim :: Stack -> Stack
