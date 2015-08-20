@@ -79,7 +79,7 @@ instance Arrow (ASyn m) where
     first (AExp f) = AExp (First f)
     second (AExp f) = AExp (Arr swapE :>>> First f :>>> Arr swapE)
     (AExp f) *** (AExp g) = AExp (f :*** g)
-    (AExp f) &&& (AExp g) = AExp (Arr dupE :>>> f :*** g)
+    (AExp f) &&& (AExp g) = AExp (Arr dupE :>>> (f :*** g))
 instance ArrowLoop (ASyn m) where
     loop (AExp f) = AExp (Loop f)
 instance ArrowInit (ASyn m) where
@@ -217,7 +217,7 @@ trace :: ((t1, t2) -> (t, t2)) -> t1 -> t
 trace f x = let (y, z) = f (x, z) in y
 
 {-# RULES
-"cross_id_id" forall (f::forall a. a -> a) (g::b -> b) . cross f g = Debug.Trace.trace "cross_id_id fired" id
+"cross_id_id" forall (f::forall a. a -> a) (g::forall b. b -> b) . cross f g = Debug.Trace.trace "cross_id_id fired" id
  #-}
 {-# NOINLINE cross #-}
 cross :: (t -> t2) -> (t1 -> t3) -> (t, t1) -> (t2, t3)

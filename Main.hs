@@ -20,6 +20,7 @@ main = do
     printCCA $(normFixed example2)
     putStrLn ""
     let banana = snd $(normOpt example2)
+    (runKleisli . runPKleisli) banana 5 >>= print . show
     --runAutoIO_ a ("http://www.google.com","http://www.cnn.com") >>= print . show
     --(runKleisli . runPKleisli) banana ("http://www.google.com","http://www.cnn.com") >>= print . show
     --(runKleisli . runPKleisli) example2 ("http://www.google.com","http://www.cnn.com") >>= print . show

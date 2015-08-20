@@ -24,7 +24,7 @@ import Language.Haskell.TH.Quote
 import Data.Generics.Uniplate.DataOnly
 import Control.Arrow.Init
 import Control.Arrow
-import Data.List (mapAccumL,findIndices,elemIndex,(\\),(!!),deleteFirstsBy,delete)
+import Data.List (mapAccumL,findIndices,elemIndex,(\\),(!!),deleteFirstsBy,delete,filter,nub)
 import Data.Graph
 import Data.Tree
 import Data.IntMap hiding (map)
@@ -67,27 +67,35 @@ data Goal = Goal {getGV::Vertex,getGE::ExpQ}
 data Expression = Expression {getEV::Vertex,getEE::ExpQ}
 instance Eq Expression where
      (==) = (==) `on` getEV
+instance Show Expression where
+  show (Expression v _) = "Expression: " ++ show v
 
 go' :: IntMap NodeE -> Graph -> [Vertex] -> [Expression] -> ExpQ
 go' mapping graph [] [Expression _ exp] = exp
+go' mapping graph [g] [Expression v exp] | g==v = exp
+go' mapping graph [] _ = error "multiple expressions, no goals"
 go' mapping graph goals exps = go' mapping graph newGoals newExps
     where
         flag a = all (flip elem (map getEV exps)) $ (transposeG graph) `access` a -- tells if a vertex is obtainable
-        flags = findIndices flag goals -- lists obtainable goals
-        (newGoals,newExps) = step (goals,exps) flags
+        flags = findIndices flag goals -- lists obtainable goal indeces
+        (newGoals,newExps) = Debug.Trace.trace ("flagged goals: " ++ show flags ++ "out of " ++ show goals ++ " and exps " ++ show exps) $ step (goals,exps) (map ( (Data.List.!!) goals) flags)
         step (goals',exps') [] = (goals',exps')
-        step (goals',exps') (flagged:rest) = step helper rest
+        step (goals',exps') (flagged:rest) = Debug.Trace.trace (show (goals',exps')) step helper rest
             where
                 expVs = map getEV exps'
-                helper = (Data.List.delete flagged goals' ++ newGoals,(createExp reqExps : remainingExps)    )
+                helper = (nub (Data.List.delete flagged goals' ++ newGoals), newExps ++ remainingExps)
                 helper2 = catMaybes $ map (flip elemIndex expVs) $ (transposeG graph) `access` flagged --indeces in exps of needed exps
                 reqExps = map ((Data.List.!!) exps') helper2
                 remainingExps = (Data.List.\\) exps' reqExps
                 newGoals = graph `access` flagged
-                createExp [] = Expression flagged [| $(currentArrow mapping flagged) |]
-                createExp [Expression _ exp] = Expression flagged [| $(exp) >>> $(currentArrow mapping flagged) |]
+                newExps =replicate (max 1 $ length newGoals) $ createExp reqExps
+                createExp [] = Debug.Trace.trace ("no reqs for " ++ show flagged) $ Expression flagged [| $(currentArrow mapping flagged) |]
+                createExp [Expression v exp] = Debug.Trace.trace ("one req for " ++ show flagged ++ " is " ++ show v) $ 
+                                  Expression flagged [| $(exp) >>> $(currentArrow mapping flagged) |]
                 -- ensure in the right order!
-                createExp more = Expression flagged [| $(foldl1 (&:&) (map getEE more)) >>> $(currentArrow mapping flagged) |]
+                createExp more = Debug.Trace.trace ("many req for " ++ show flagged ++ " is " ++ show more) $ 
+                                  Expression flagged [| $(foldl1 (&:&) (map getEE more)) >>> $(currentArrow mapping flagged) |]
+
 
 
 go :: Forest Vertex -> IntMap NodeE -> ExpQ

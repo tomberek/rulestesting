@@ -12,6 +12,7 @@ import           Control.Arrow
 import           Control.Concurrent          (threadDelay)
 import           Data.Time
 import           Network.HTTP
+{-
 line1 :: (M a ~ IO,ArrowInit a) => a (String, String) ()
 line1 = [arrowInit| proc (n,g) -> do
     a <- getURLSum -< n
@@ -67,27 +68,16 @@ example4 = [arrowInit|
         d <- arr (*2) -< a*1
         returnA -< n
             |]
-
+---}
 example2 :: ArrowInit a => a Int Int
 example2 = [arrowG|
     proc n -> do
         b <-  arr (+1) -< n
-        e <-  arr (+1) -< n
-        c <-  arr (+1) -< b
+        e <-  arr (+2) -< n
+        c <-  arr (+3) -< b
         d <-  arr (uncurry (+)) -< (c,e)
-        arr (uncurry (+)) -< (n,d)
+        arr (uncurry (-)) -< (n,d)
             |]
-temp2 :: ASyn m Int Int
-temp2 = [arrowInit| arr (\a -> (a+3)) >>> arr (+2) |]
-
-example0 :: ArrowInit a => a Int Int
-example0 = [arrowInit|proc n -> arr (+1) -< n+2 |]
-
-
-example3 :: Int -> Int
-(_,example3) = $(normOpt [arrowInit|
-    proc n -> arr id -< n+2
-    |] )
 
 {-
 i :: Int -> Int
