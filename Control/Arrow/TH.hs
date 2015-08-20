@@ -26,54 +26,80 @@ import Control.Arrow.Init
 import Control.Arrow
 import Data.List (mapAccumL)
 import Data.Graph
+import Data.Tree
+import Data.IntMap hiding (map)
 import Data.Function
 import Language.Haskell.TH.Utilities
 import qualified Data.Set as Set
 import Data.Maybe
+import Debug.Trace
 
 type ArrowExp = E.Exp
 -- | A 'QuasiQuoter' that desugars proc-do notation.
 arrowG :: QuasiQuoter
 arrowG = arrowInit{
     quoteExp = \input -> case parseArrow input of
-        E.ParseOk result -> error $ show $ topSort $ process [] result
+        E.ParseOk result -> Debug.Trace.trace (unlines $
+                [show $ topSort graph
+                ,show graph
+                ,show $ dfs graph (topSort graph)
+                ,drawForest $ (fmap (fmap show) $ dfs graph (topSort graph))
+                ,drawForest $ (fmap (fmap show) $ dfs (transposeG graph) (topSort $ transposeG graph))
+                ])
+                (go graphDFS nodes)
+                where (transposeG -> graph,nodes) = process [] result
+                      graphDFS = dfs graph (topSort graph)
         E.ParseFailed l err -> error $ show l ++ show err}
 
-data Node where
-    ProcN :: Int -> E.Pat -> Node
-    StmtN :: Int -> E.Pat -> E.Exp -> ArrowExp -> Node
-    CmdN  :: Int -> E.Exp -> ArrowExp -> Node
-newtype P = P Node
-instance Eq Node where
+data NodeE where
+    ProcN :: Int -> E.Pat -> NodeE
+    StmtN :: Int -> E.Pat -> E.Exp -> ArrowExp -> NodeE
+    CmdN  :: Int -> E.Exp -> ArrowExp -> NodeE
+newtype P = P NodeE
+instance Eq NodeE where
     (==) = (==) `on` getId
-instance Ord Node where
+instance Ord NodeE where
     compare = compare `on` getId
 
+go :: Forest Vertex -> IntMap NodeE -> ExpQ
+go [] mapping = [| arr id |]
+go [Node a rest] mapping = [| $(go rest mapping) >>> $(currentArrow mapping a) |]
+go [Node a rest,Node b rest2] mapping =
+    [| ( $(go rest mapping) >>> $(currentArrow mapping a) ) &&& ( $(go rest2 mapping) >>> $(currentArrow mapping b) ) |]
+
+go forest mapping = error $ unlines ["only defined for 2-branching",drawForest $ fmap (fmap show) forest]
+
+process :: [NodeE] -> E.Exp -> (Graph,IntMap NodeE)
 process ps (E.Proc a b c) = process (ProcN 0 b:ps) c
-process ps (E.Do statements) = buildGr $ ps ++ (snd $ mapAccumL makeNodes 1 statements)
+process ps (E.Do statements) = (buildGr $ allNodes,fromAscList $ zip (map getId allNodes) allNodes)
     where
+        allNodes = ps ++ (snd $ mapAccumL makeNodes 1 statements)
         makeNodes i (E.Generator _ p (E.LeftArrApp e1 e2)) = (i+1,StmtN i p e2 e1)
         makeNodes i (E.Qualifier (E.LeftArrApp e1 e2)) = (i+1,CmdN i e2 e1)
 
-groupNodes :: [Int] -> [Node] -> [[Node]]
+groupNodes :: [Int] -> [NodeE] -> [[NodeE]]
 groupNodes (n:ns) nodes = undefined
 
 getId (ProcN i _)=i
 getId (StmtN i _ _ _)=i
 getId (CmdN i _ _) = i
+currentArrow mapping a= getArrow $ mapping ! a
+getArrow (StmtN _ p e a) = returnQ $ toExp a
+getArrow (CmdN _ e a) = [|  $(returnQ $ toExp a) |]
+getArrow _ = [| id |]
 
-buildGr :: [Node] -> Graph
+buildGr :: [NodeE] -> Graph
 buildGr n = buildG (0,length n - 1) $ makeEdges n
-makeEdges :: [Node] -> [Edge]
+makeEdges :: [NodeE] -> [Edge]
 makeEdges [] = []
 makeEdges (n:ns) = (makeEdges ns) ++ (catMaybes $ map (makeEdge (freeVars $ P n) (getId n)) ns)
 
-makeEdge :: Set.Set E.Name -> Int -> Node -> Maybe Edge
+makeEdge :: Set.Set E.Name -> Int -> NodeE -> Maybe Edge
 makeEdge names i node = if Set.null f then Nothing else Just (i,getId node)
     where
           f = names `Set.intersection` (freeVars node)
 
-instance FreeVars Node where
+instance FreeVars NodeE where
     freeVars (StmtN _ _ e _) = freeVars e
     freeVars (CmdN _ e _) = freeVars e
 instance FreeVars P where

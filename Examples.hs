@@ -69,10 +69,14 @@ example4 = [arrowInit|
             |]
 
 example2 :: ArrowInit a => a Int Int
-example2 = [arrowInit|
+example2 = [arrowG|
     proc n -> do
-        returnA -< 10*n
-    |]
+        b <-  arr (+1) -< n
+        e <-  arr (+1) -< n
+        c <-  arr (+1) -< b
+        d <-  arr (uncurry (+)) -< (c,e)
+        arr (uncurry (+)) -< (n,d)
+            |]
 temp2 :: ASyn m Int Int
 temp2 = [arrowInit| arr (\a -> (a+3)) >>> arr (+2) |]
 
