@@ -64,15 +64,15 @@ instance Ord NodeE where
     compare = compare `on` getId
 
 data Goal = Goal {getGV::Vertex,getGE::ExpQ}
-data Expression = Expression {getEV::Vertex,getEE::ExpQ}
+data Expression = Expression {getEV::Vertex,getName::E.Name,getEE::ExpQ}
 instance Eq Expression where
      (==) = (==) `on` getEV
 instance Show Expression where
-  show (Expression v _) = "Expression: " ++ show v
+  show (Expression v n _) = "Expression: " ++ show v ++ " named: " ++ show n
 
 go' :: IntMap NodeE -> Graph -> [Vertex] -> [Expression] -> ExpQ
-go' mapping graph [] [Expression _ exp] = exp
-go' mapping graph [g] [Expression v exp] | g==v = exp
+go' mapping graph [] [Expression _ _ exp] = exp
+go' mapping graph [g] [Expression v _ exp] | g==v = exp
 go' mapping graph [] _ = error "multiple expressions, no goals"
 go' mapping graph goals exps = go' mapping graph newGoals newExps
     where
@@ -89,12 +89,16 @@ go' mapping graph goals exps = go' mapping graph newGoals newExps
                 remainingExps = (Data.List.\\) exps' reqExps
                 newGoals = graph `access` flagged
                 newExps =replicate (max 1 $ length newGoals) $ createExp reqExps
-                createExp [] = Debug.Trace.trace ("no reqs for " ++ show flagged) $ Expression flagged [| $(currentArrow mapping flagged) |]
-                createExp [Expression v exp] = Debug.Trace.trace ("one req for " ++ show flagged ++ " is " ++ show v) $ 
-                                  Expression flagged [| $(exp) >>> $(currentArrow mapping flagged) |]
+                createExp [] = Debug.Trace.trace ("no reqs for " ++ show flagged) $ Expression flagged thisPat [| $(currentArrow mapping flagged) |]
+                createExp [Expression v _ exp] = Debug.Trace.trace ("one req for " ++ show flagged ++ " is " ++ show v) $
+                                  Expression flagged thisPat [| $(exp) >>> $(currentArrow mapping flagged) |]
                 -- ensure in the right order!
-                createExp more = Debug.Trace.trace ("many req for " ++ show flagged ++ " is " ++ show more) $ 
+                createExp more = Debug.Trace.trace ("many req for " ++ show flagged ++ " is " ++ show more) $
                                   Expression flagged [| $(foldl1 (&:&) (map getEE more)) >>> $(currentArrow mapping flagged) |]
+                thisNode = mapping ! flagged
+                thisPat = head $ freeVars $ getPat thisNode
+                order = reverse $ freeVars $ getExp thisNode
+
 
 
 
@@ -125,17 +129,23 @@ currentArrow mapping a= getArrow $ mapping ! a
 getArrow (StmtN _ p e a) = returnQ $ toExp a
 getArrow (CmdN _ e a) = [|  $(returnQ $ toExp a) |]
 getArrow _ = [| arr id |]
+getExp (ProcN _ _) = error "no expression in ProcN"
+getExp (StmtN i _ e _) = e
+getExp (CmdN i e _) = e
+getPat (ProcN _ p) = p
+getPat (StmtN _ p _ _) = p
+getPat (CmdN _ _ _) = error "no pattern in CmdN"
 
 buildGr :: [NodeE] -> Graph
 buildGr n = buildG (0,length n - 1) $ makeEdges n
 makeEdges :: [NodeE] -> [Edge]
 makeEdges [] = []
-makeEdges (n:ns) = (makeEdges ns) ++ (catMaybes $ map (makeEdge (freeVars $ P n) (getId n)) ns)
+makeEdges (n:ns) = (makeEdges ns) ++ (catMaybes $ map (makeEdge (Set.fromList $ freeVars $ P n) (getId n)) ns)
 
 makeEdge :: Set.Set E.Name -> Int -> NodeE -> Maybe Edge
 makeEdge names i node = if Set.null f then Nothing else Just (i,getId node)
     where
-          f = names `Set.intersection` (freeVars node)
+          f = names `Set.intersection` (Set.fromList $ freeVars node)
 
 instance FreeVars NodeE where
     freeVars (StmtN _ _ e _) = freeVars e
@@ -143,7 +153,7 @@ instance FreeVars NodeE where
 instance FreeVars P where
     freeVars (P (ProcN _ p)) = freeVars p
     freeVars (P (StmtN _ p _ _)) = freeVars p
-    freeVars (P (CmdN _ p _)) = Set.empty
+    freeVars (P (CmdN _ p _)) = []
 
 -- proc = C C
 -- cmd = O O

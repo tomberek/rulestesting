@@ -11,33 +11,32 @@ module Language.Haskell.TH.Utilities(
 ) where
 
 import           Data.Generics                (everywhere, mkT)
-import           Data.Set                     (Set)
-import qualified Data.Set                     as Set
+import           Data.List
 import           Language.Haskell.Exts.Syntax
 
 -- The set of free variables in some construct.
 class FreeVars a where
-    freeVars :: a -> Set Name
+    freeVars :: a -> [Name]
 
 instance FreeVars a => FreeVars [a] where
-    freeVars = Set.unions . map freeVars
+    freeVars = foldl' union [] . map freeVars
 
 instance FreeVars Pat where
-    freeVars (PVar n) = Set.singleton n
+    freeVars (PVar n) = [n]
 #if __GLASGOW_HASKELL__ <= 708
-    freeVars (PLit _) = Set.empty
+    freeVars (PLit _) = []
     freeVars (PNeg p) = freeVars p
 #else
-    freeVars (PLit _ _) = Set.empty
+    freeVars (PLit _ _) = []
 #endif
-    freeVars (PInfixApp p1 _ p2) = freeVars p1 `Set.union` freeVars p2
+    freeVars (PInfixApp p1 _ p2) = freeVars p1 `union` freeVars p2
     freeVars (PApp _ ps) = freeVars ps
     freeVars (PTuple _ ps) = freeVars ps
     freeVars (PList ps) = freeVars ps
     freeVars (PParen p) = freeVars p
     freeVars (PRec _ pfs) = freeVars pfs
-    freeVars (PAsPat n p) = Set.insert n (freeVars p)
-    freeVars (PWildCard) = Set.empty
+    freeVars (PAsPat n p) = n : (freeVars p)
+    freeVars (PWildCard) = []
     freeVars (PIrrPat p) = freeVars p
 
 instance FreeVars PatField where
@@ -48,60 +47,57 @@ instance FreeVars FieldUpdate where
 
 instance FreeVars Exp where
     freeVars (Var n) = freeVars n
-    freeVars (Con _) = Set.empty
-    freeVars (Lit _) = Set.empty
+    freeVars (Con _) = []
+    freeVars (Lit _) = []
     freeVars (InfixApp e1 op e2) =
-          freeVars e1 `Set.union` freeVars op `Set.union` freeVars e2
-    freeVars (App f e) = freeVars f `Set.union` freeVars e
+          freeVars e1 `union` freeVars op `union` freeVars e2
+    freeVars (App f e) = freeVars f `union` freeVars e
     freeVars (NegApp e) = freeVars e
-    freeVars (Lambda _ ps e) = freeVars e `Set.difference` freeVars ps
+    freeVars (Lambda _ ps e) = freeVars e \\ freeVars ps
     freeVars (Let decls e) =
-          (freeVars decls `Set.union` freeVars e) `Set.difference`
-                definedVars decls
+          (freeVars decls `union` freeVars e) \\ definedVars decls
     freeVars (If e1 e2 e3) =
-          freeVars e1 `Set.union` freeVars e2 `Set.union` freeVars e3
-    freeVars (Case e as) = freeVars e `Set.union` freeVars as
+          freeVars e1 `union` freeVars e2 `union` freeVars e3
+    freeVars (Case e as) = freeVars e `union` freeVars as
     freeVars (Do ss) = freeVarsStmts ss
     freeVars (Tuple _ es) = freeVars es
     freeVars (List es) = freeVars es
     freeVars (Paren e) = freeVars e
-    freeVars (LeftSection e op) = freeVars e `Set.union` freeVars op
-    freeVars (RightSection op e) = freeVars op `Set.union` freeVars e
+    freeVars (LeftSection e op) = freeVars e `union` freeVars op
+    freeVars (RightSection op e) = freeVars op `union` freeVars e
     freeVars (RecConstr _ us) = freeVars us
-    freeVars (RecUpdate e us) = freeVars e `Set.union` freeVars us
+    freeVars (RecUpdate e us) = freeVars e `union` freeVars us
     freeVars (EnumFrom e) = freeVars e
-    freeVars (EnumFromTo e1 e2) = freeVars e1 `Set.union` freeVars e2
-    freeVars (EnumFromThen e1 e2) = freeVars e1 `Set.union` freeVars e2
+    freeVars (EnumFromTo e1 e2) = freeVars e1 `union` freeVars e2
+    freeVars (EnumFromThen e1 e2) = freeVars e1 `union` freeVars e2
     freeVars (EnumFromThenTo e1 e2 e3) =
-          freeVars e1 `Set.union` freeVars e2 `Set.union` freeVars e3
-    -- freeVars (ListComp e ss) = freeVars e `Set.union` freeVarsStmts ss
+          freeVars e1 `union` freeVars e2 `union` freeVars e3
+    -- freeVars (ListComp e ss) = freeVars e `union` freeVarsStmts ss
     freeVars (ExpTypeSig _ e _) = freeVars e
 
 instance FreeVars QOp where
     freeVars (QVarOp n) = freeVars n
-    freeVars (QConOp _) = Set.empty
+    freeVars (QConOp _) = []
 
 instance FreeVars QName where
-    freeVars (UnQual v) = Set.singleton v
-    freeVars _ = Set.empty
+    freeVars (UnQual v) = [v]
+    freeVars _ = []
 
 #if __GLASGOW_HASKELL__ <= 708
 instance FreeVars Alt where
     freeVars (Alt _ p gas decls) =
-          (freeVars gas `Set.union` freeVars decls) `Set.difference`
-          (freeVars p `Set.union` definedVars decls)
+          (freeVars gas `union` freeVars decls) \\ (freeVars p `union` definedVars decls)
 
 instance FreeVars GuardedAlts where
     freeVars (UnGuardedAlt e) = freeVars e
     freeVars (GuardedAlts alts) = freeVars alts
 
 instance FreeVars GuardedAlt where
-    freeVars (GuardedAlt _ e1 e2) = freeVars e1 `Set.union` freeVars e2
+    freeVars (GuardedAlt _ e1 e2) = freeVars e1 `union` freeVars e2
 #else
 instance FreeVars Alt where
     freeVars (Alt _ p rhs binds) =
-          (freeVars rhs `Set.union` freeVars binds) `Set.difference`
-          (freeVars p `Set.union` definedVars binds)
+          (freeVars rhs `union` freeVars binds) \\ (freeVars p `union` definedVars binds)
 #endif
 
 instance FreeVars Decl where
@@ -111,24 +107,22 @@ instance FreeVars Decl where
 #else
     freeVars (PatBind _ p rhs decls) =
 #endif
-          (freeVars rhs `Set.union` freeVars decls) `Set.difference`
-          (freeVars p `Set.union` definedVars decls)
-    freeVars _ = Set.empty
+          (freeVars rhs `union` freeVars decls) \\ (freeVars p `union` definedVars decls)
+    freeVars _ = []
 
 instance FreeVars Match where
     freeVars (Match _ n ps _ rhs decls) =
-          (freeVars rhs `Set.union` freeVars decls) `Set.difference`
-          (Set.insert n (freeVars ps) `Set.union` definedVars decls)
+          (freeVars rhs `union` freeVars decls) \\ (n : ((freeVars ps) `union` definedVars decls))
 
 instance FreeVars Rhs where
     freeVars (UnGuardedRhs e) = freeVars e
     freeVars (GuardedRhss grs) = freeVars grs
 
 instance FreeVars GuardedRhs where
-    freeVars (GuardedRhs _ e1 e2) = freeVars e1 `Set.union` freeVars e2
+    freeVars (GuardedRhs _ e1 e2) = freeVars e1 `union` freeVars e2
 
 instance FreeVars Stmt where
-    freeVars (Generator _ p e) = freeVars e `Set.difference` freeVars p
+    freeVars (Generator _ p e) = freeVars e \\ freeVars p
     freeVars (Qualifier e) = freeVars e
     freeVars (LetStmt bs) = freeVars bs
     freeVars (RecStmt bs) = freeVars bs
@@ -139,29 +133,29 @@ instance FreeVars Binds where
 instance FreeVars IPBind where
     freeVars (IPBind _ i e) = error "freeVars IPBind not defined"
 
-freeVarsStmts :: [Stmt] -> Set Name
-freeVarsStmts = foldr addStmt Set.empty
-    where addStmt (Generator _ p e) s = freeVars e `Set.union` (s `Set.difference` freeVars p)
+freeVarsStmts :: [Stmt] -> [Name]
+freeVarsStmts = foldr addStmt []
+    where addStmt (Generator _ p e) s = freeVars e `union` (s \\ freeVars p)
           addStmt (Qualifier e) _s = freeVars e
           addStmt (LetStmt decls) s =
-                (freeVars decls `Set.union` s) `Set.difference` definedVars decls
+                (freeVars decls `union` s) \\ definedVars decls
 
 -- The set of variables defined by a construct.
 
 class DefinedVars a where
-    definedVars :: a -> Set Name
+    definedVars :: a -> [Name]
 
 instance DefinedVars a => DefinedVars [a] where
-    definedVars = Set.unions . map definedVars
+    definedVars = foldl' union [] . map definedVars
 
 instance DefinedVars Decl where
-    definedVars (FunBind (Match _ n _ _ _ _:_)) = Set.singleton n
+    definedVars (FunBind (Match _ n _ _ _ _:_)) = [n]
 #if __GLASGOW_HASKELL__ <= 708
     definedVars (PatBind _ p _ _ _) = freeVars p
 #else
     definedVars (PatBind _ p _ _) = freeVars p
 #endif
-    definedVars _ = Set.empty
+    definedVars _ = []
 
 instance DefinedVars Binds where
     definedVars (BDecls ds) = definedVars ds
