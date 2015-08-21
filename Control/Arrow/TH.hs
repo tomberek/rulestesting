@@ -25,7 +25,7 @@ import Data.Generics.Uniplate.DataOnly
 import Control.Arrow.Init
 import Control.Arrow
 import qualified Control.Category as Q
-import Data.List (mapAccumL,findIndices,elemIndex,(\\),(!!),delete,filter,nub)
+import Data.List (mapAccumL,findIndices,elemIndex,(\\),(!!),delete,filter,nub,find)
 import Data.Graph
 import Data.Tree
 import Data.IntMap hiding (map)
@@ -65,15 +65,16 @@ instance Ord NodeE where
     compare = compare `on` getId
 
 data Goal = Goal {getGV::Vertex,getGE::ExpQ}
-data Expression = Expression {getEV::Vertex,getName::E.Name,getEE::ExpQ}
+data Expression = Expression {getEV::Vertex,getName::E.Name,getPattern::E.Pat,getEE::ExpQ}
 instance Eq Expression where
      (==) = (==) `on` getEV
 instance Show Expression where
-  show (Expression v n _) = "Expression: " ++ show v ++ " named: " ++ show n
+  show (Expression v n _ _) = "Expression: " ++ show v ++ " named: " ++ show n
 
 go' :: IntMap NodeE -> Graph -> [Vertex] -> [Expression] -> ExpQ
-go' mapping graph [] [Expression _ _ exp] = exp
-go' mapping graph [g] [Expression v _ exp] | g==v = exp
+go' mapping graph [] [Expression _ _ _ exp] = exp
+go' mapping graph [g] [Expression v _ _ exp] | g==v = exp
+go' (fst . findMax -> target) _ _ exps | elem target (map getEV exps) = getEE . fromJust $ Data.List.find ( (==) target . getEV) exps
 go' mapping graph [] _ = error "multiple expressions, no goals"
 go' mapping graph goals exps = go' mapping graph newGoals newExps
     where
@@ -90,16 +91,28 @@ go' mapping graph goals exps = go' mapping graph newGoals newExps
                 remainingExps = (Data.List.\\) exps' reqExps
                 newGoals = graph `access` flagged
                 newExps =replicate (max 1 $ length newGoals) $ createExp reqExps
-                createExp [] = Debug.Trace.trace ("no reqs for " ++ show flagged) $ Expression flagged thisPat [| $(currentArrow mapping flagged) |]
-                createExp [Expression v _ exp] = Debug.Trace.trace ("one req for " ++ show flagged ++ " is " ++ show v) $
-                                  Expression flagged thisPat [| $(exp) >>> $(currentArrow mapping flagged) |]
+                createExp [] = Debug.Trace.trace ("no reqs for " ++ show flagged) $ Expression flagged thisName thisPat [| $(currentArrow mapping flagged) |]
+                createExp [Expression v _ p exp] = Debug.Trace.trace ("one req for " ++ show flagged ++ " is " ++ show v) $
+                                  Expression flagged thisName thisPat [| $(patCorrection p thisExp exp) >>> $(currentArrow mapping flagged) |]
                 -- ensure in the right order!
                 createExp more = Debug.Trace.trace ("many req for " ++ show flagged ++ " is " ++ show more ++ " new order:" ++ show order) $
-                                  Expression flagged thisPat [| $(foldl1 (&:&) createTuple) >>> $(currentArrow mapping flagged) |]
+                                  Expression flagged thisName thisPat [| $(foldl1 (&:&) createTuple) >>> $(currentArrow mapping flagged) |]
+                -- assumes that the vars are in a tuple, in order
                 createTuple = catMaybes $ map (flip Prelude.lookup $ zip (map getName reqExps) (map getEE reqExps)) order
                 thisNode = mapping ! flagged
-                thisPat = head $ freeVars $ getPat thisNode
+                thisPat = getPat thisNode
+                thisExp = getExp thisNode
+                thisName = case freeVars thisPat of
+                    (a:_) -> a
+                    otherwise -> E.Ident "inCommand"
                 order = freeVars $ getExp thisNode
+
+-- | Creates a lambda if needed from pattern to expression
+patCorrection :: E.Pat -> E.Exp -> ExpQ -> ExpQ
+patCorrection p@(E.PVar n) e@(E.Var qn) exp | toName qn == toName n = exp
+                        | otherwise = [| $exp >>> arr (\ $(returnQ $ toPat p) -> $(returnQ $ toExp e)) |]
+patCorrection p e@(E.App _ _) exp = [| $exp >>> arr (\ $(returnQ $ toPat p) -> $(returnQ $ toExp e)) |]
+patCorrection p e exp = [| $exp >>> arr (\ $(returnQ $ toPat p) -> $(returnQ $ toExp e)) |]
 
 go :: Forest Vertex -> IntMap NodeE -> ExpQ
 go [] mapping = [| Q.id|]
@@ -133,7 +146,7 @@ getExp (StmtN i _ e _) = e
 getExp (CmdN i e _) = e
 getPat (ProcN _ p) = p
 getPat (StmtN _ p _ _) = p
-getPat (CmdN i e _) = error $ "no pattern in CmdN:" ++ show e ++ " at line:" ++ show i
+getPat (CmdN i e _) = E.PWildCard --error $ "no pattern in CmdN:" ++ show e ++ " at line:" ++ show i
 
 buildGr :: [NodeE] -> Graph
 buildGr n = buildG (0,length n -1) $ makeEdges n

@@ -19,7 +19,8 @@ main = do
     putStrLn ""
     printCCA $(normFixed example4)
     putStrLn ""
-    let banana = snd $(normOpt example4)
+    printCCA $(normFixed example4b)
+    let banana = snd $(normOpt example4b)
     print $ banana (5::Int)
     printCCA example2
     putStrLn ""
@@ -27,6 +28,7 @@ main = do
     putStrLn ""
     let b = snd $(normOpt example2)
     print $ b (5::Int)
+    
     --runAutoIO_ a ("http://www.google.com","http://www.cnn.com") >>= print . show
     --(runKleisli . runPKleisli) banana ("http://www.google.com","http://www.cnn.com") >>= print . show
     --(runKleisli . runPKleisli) example2 ("http://www.google.com","http://www.cnn.com") >>= print . show

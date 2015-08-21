@@ -75,8 +75,9 @@ example4b = [arrowG|
         () <- returnA -< n
         _ <- arr (*2) -< n+1
         d <- arr (*2) -< a*1
-        returnA -< n
+        returnA -< n+1
             |]
+
 example2 :: ArrowInit a => a Int Int
 example2 = [arrowG|
     proc n -> do
