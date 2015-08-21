@@ -57,6 +57,7 @@ infixl 1 :>>>
 infixl 1 :***
 
 instance Show AExp where
+    show Id = "Id"
     show (Arr _) = "Arr"
     show (First f) = "First " ++ show f
     show (ArrM _) = "ArrM"
@@ -114,7 +115,7 @@ type Traversal = AExp -> AExp
 imap :: Traversal -> Traversal
 imap h (First f) = First (h f)
 imap h (f :>>> g) = h f :>>> h g
-imap h (f :*** g) = (h f) :*** (h g) -- Added by TOM
+imap h (f :*** g) = h f :*** h g -- Added by TOM
 imap h (Loop f) = Loop (h f)
 imap h (Lft f) = Lft (h f)
 imap _ x = x

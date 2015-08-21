@@ -140,7 +140,7 @@ instance FreeVars IPBind where
 freeVarsStmts :: [Stmt] -> [Name]
 freeVarsStmts = foldr addStmt []
     where addStmt (Generator _ p e) s = freeVars e `union` (s \\ freeVars p)
-          addStmt (Qualifier e) s = freeVars e
+          addStmt (Qualifier e) _ = freeVars e
           addStmt (LetStmt decls) s =
                 (freeVars decls `union` s) \\ definedVars decls
           addStmt _ _ = error "Only Generator,Qualifier and LetStmt implemented in freeVarsStmts"

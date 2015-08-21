@@ -45,6 +45,7 @@ class ArrowLoop a => ArrowInit a where
     arrM' _ = arrM
 
 newtype PKleisli a b = PKleisli {runPKleisli :: Kleisli IO a b} deriving (Category,ArrowLoop)
+rr :: PKleisli a b -> a -> IO b
 rr = runKleisli . runPKleisli
 instance Arrow (PKleisli) where
     arr = PKleisli . arr

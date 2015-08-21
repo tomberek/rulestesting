@@ -2,13 +2,13 @@
 {-# LANGUAGE TemplateHaskell #-}
 module Main where
 
-import           Control.Category
+
 import           Prelude                     hiding (id, (.))
 
 --import           Auto
-import           Control.Arrow
 
-import           Control.Arrow.Init
+
+
 import           Control.Arrow.Init.Optimize
 
 import           Examples
@@ -19,12 +19,12 @@ main = do
     putStrLn ""
     printCCA $(normFixed example4)
     putStrLn ""
-    printCCA $(normFixed example4b)
+    printCCA ( $(normFixed example4b) :: ASyn m Int Int)
     let banana = snd $(normOpt example4b)
     print $ banana (5::Int)
     printCCA example2
     putStrLn ""
-    printCCA $(normFixed example2)
+    printCCA ($(normFixed example2) :: ASyn m Int Int)
     putStrLn ""
     let b = snd $(normOpt example2)
     print $ b (5::Int)

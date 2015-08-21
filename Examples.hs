@@ -23,6 +23,7 @@ line1 = [arrowInit| proc (n,g) -> do
     _ <- arrM print -< a + c + d
     returnA -< ()
     |]
+
 processURL :: String -> IO String
 processURL a = do
     getCurrentTime >>= print
@@ -60,7 +61,7 @@ example1 = [arrowInit|
 ---}
 
 example4 :: ArrowInit a => a Int Int
-example4 = [arrowInit|
+example4 = [arrow|
      proc n -> do
         a <- arr (+1) -< n
         returnA -< n
@@ -69,7 +70,7 @@ example4 = [arrowInit|
         returnA -< n
             |]
 example4b :: ArrowInit a => a Int Int
-example4b = [arrowG|
+example4b = [arrow|
      proc n -> do
         a <- arr (+1) -< n
         () <- returnA -< n
@@ -79,7 +80,7 @@ example4b = [arrowG|
             |]
 
 example2 :: ArrowInit a => a Int Int
-example2 = [arrowG|
+example2 = [arrow|
     proc n -> do
         b <-  arr (+1) -< n
         e <-  arr (+2) -< n
