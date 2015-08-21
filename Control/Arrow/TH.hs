@@ -24,7 +24,8 @@ import Language.Haskell.TH.Quote
 import Data.Generics.Uniplate.DataOnly
 import Control.Arrow.Init
 import Control.Arrow
-import Data.List (mapAccumL,findIndices,elemIndex,(\\),(!!),deleteFirstsBy,delete,filter,nub)
+import qualified Control.Category as Q
+import Data.List (mapAccumL,findIndices,elemIndex,(\\),(!!),delete,filter,nub)
 import Data.Graph
 import Data.Tree
 import Data.IntMap hiding (map)
@@ -93,17 +94,15 @@ go' mapping graph goals exps = go' mapping graph newGoals newExps
                 createExp [Expression v _ exp] = Debug.Trace.trace ("one req for " ++ show flagged ++ " is " ++ show v) $
                                   Expression flagged thisPat [| $(exp) >>> $(currentArrow mapping flagged) |]
                 -- ensure in the right order!
-                createExp more = Debug.Trace.trace ("many req for " ++ show flagged ++ " is " ++ show more) $
-                                  Expression flagged [| $(foldl1 (&:&) (map getEE more)) >>> $(currentArrow mapping flagged) |]
+                createExp more = Debug.Trace.trace ("many req for " ++ show flagged ++ " is " ++ show more ++ " new order:" ++ show order) $
+                                  Expression flagged thisPat [| $(foldl1 (&:&) createTuple) >>> $(currentArrow mapping flagged) |]
+                createTuple = catMaybes $ map (flip Prelude.lookup $ zip (map getName reqExps) (map getEE reqExps)) order
                 thisNode = mapping ! flagged
                 thisPat = head $ freeVars $ getPat thisNode
-                order = reverse $ freeVars $ getExp thisNode
-
-
-
+                order = freeVars $ getExp thisNode
 
 go :: Forest Vertex -> IntMap NodeE -> ExpQ
-go [] mapping = [| arr id |]
+go [] mapping = [| Q.id|]
 go [Node a []] mapping = [| $(currentArrow mapping a) |]
 go [Node a rest] mapping = [| $(go rest mapping) >>> $(currentArrow mapping a) |]
 go [Node a rest,Node b rest2] mapping =
@@ -128,16 +127,16 @@ getId (CmdN i _ _) = i
 currentArrow mapping a= getArrow $ mapping ! a
 getArrow (StmtN _ p e a) = returnQ $ toExp a
 getArrow (CmdN _ e a) = [|  $(returnQ $ toExp a) |]
-getArrow _ = [| arr id |]
+getArrow _ = [| Q.id |]
 getExp (ProcN _ _) = error "no expression in ProcN"
 getExp (StmtN i _ e _) = e
 getExp (CmdN i e _) = e
 getPat (ProcN _ p) = p
 getPat (StmtN _ p _ _) = p
-getPat (CmdN _ _ _) = error "no pattern in CmdN"
+getPat (CmdN i e _) = error $ "no pattern in CmdN:" ++ show e ++ " at line:" ++ show i
 
 buildGr :: [NodeE] -> Graph
-buildGr n = buildG (0,length n - 1) $ makeEdges n
+buildGr n = buildG (0,length n -1) $ makeEdges n
 makeEdges :: [NodeE] -> [Edge]
 makeEdges [] = []
 makeEdges (n:ns) = (makeEdges ns) ++ (catMaybes $ map (makeEdge (Set.fromList $ freeVars $ P n) (getId n)) ns)

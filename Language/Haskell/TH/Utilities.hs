@@ -38,12 +38,15 @@ instance FreeVars Pat where
     freeVars (PAsPat n p) = n : (freeVars p)
     freeVars (PWildCard) = []
     freeVars (PIrrPat p) = freeVars p
+    freeVars _ = error "freeVars for Pat not fully implemented"
 
 instance FreeVars PatField where
     freeVars (PFieldPat _ p) = freeVars p
+    freeVars _ = error "freeVars for PatField not fully implemented"
 
 instance FreeVars FieldUpdate where
     freeVars (FieldUpdate _ e) = freeVars e
+    freeVars _ = error "freeVars for FieldUpdate not fully implemented"
 
 instance FreeVars Exp where
     freeVars (Var n) = freeVars n
@@ -74,6 +77,7 @@ instance FreeVars Exp where
           freeVars e1 `union` freeVars e2 `union` freeVars e3
     -- freeVars (ListComp e ss) = freeVars e `union` freeVarsStmts ss
     freeVars (ExpTypeSig _ e _) = freeVars e
+    freeVars _ = error "freeVars for Exp not fully implemented"
 
 instance FreeVars QOp where
     freeVars (QVarOp n) = freeVars n
@@ -131,14 +135,15 @@ instance FreeVars Binds where
     freeVars (BDecls bs) = freeVars bs
     freeVars (IPBinds bs) = freeVars bs
 instance FreeVars IPBind where
-    freeVars (IPBind _ i e) = error "freeVars IPBind not defined"
+    freeVars (IPBind _ _ _) = error "freeVars IPBind not defined"
 
 freeVarsStmts :: [Stmt] -> [Name]
 freeVarsStmts = foldr addStmt []
     where addStmt (Generator _ p e) s = freeVars e `union` (s \\ freeVars p)
-          addStmt (Qualifier e) _s = freeVars e
+          addStmt (Qualifier e) s = freeVars e
           addStmt (LetStmt decls) s =
                 (freeVars decls `union` s) \\ definedVars decls
+          addStmt _ _ = error "Only Generator,Qualifier and LetStmt implemented in freeVarsStmts"
 
 -- The set of variables defined by a construct.
 
@@ -159,7 +164,7 @@ instance DefinedVars Decl where
 
 instance DefinedVars Binds where
     definedVars (BDecls ds) = definedVars ds
-    definedVars (IPBinds ds) = error "definedVars IPBinds not defined"
+    definedVars (IPBinds _) = error "definedVars IPBinds not defined"
 
 -- Is the pattern failure-free?
 -- (This is incomplete at the moment, because patterns made with unique
@@ -229,9 +234,11 @@ times :: Int -> (a -> a) -> a -> a
 times n f a = foldr ($) a (replicate n f)
 
 -- | helper for template haskell syntax hack
+hsQuote :: Exp -> Exp
 hsQuote e = App (App lq e) rq
   where lq = var "[|"
         rq = var "|]"
+hsSplice :: Exp -> Exp
 hsSplice e = App (App lq e) rq
   where lq = var "$("
         rq = var ")"
@@ -243,4 +250,5 @@ quoteInit = everywhere (mkT aux)
   where
      aux (App (Var (UnQual (Ident "init"))) i) = App (App (var "init'") (hsQuote i)) i
      aux x = x
+var :: String -> Exp
 var = Var . UnQual . Ident

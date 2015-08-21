@@ -17,7 +17,7 @@ Added ArrowEffect in order to model effectful arrows.
 -}
 module Control.Arrow.Init where
 
-import           Control.Applicative
+
 import           Control.Arrow
 import           Control.Category         (Category)
 import           Control.Concurrent.Async
@@ -55,5 +55,5 @@ instance Arrow (PKleisli) where
 
 instance ArrowInit (PKleisli) where
     init = error "init for PKleisli not defined"
-    type M (PKleisli) = IO
+    type M PKleisli = IO
     arrM f = PKleisli $ Kleisli f

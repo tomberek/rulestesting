@@ -1,18 +1,16 @@
-{-# LANGUAGE Arrows          #-}
 {-# LANGUAGE QuasiQuotes     #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilies    #-}
 module Examples where
 import           Control.Arrow.Init.Optimize
 import           Control.Arrow.TH
 
-import           Control.Applicative
+
 import           Control.Arrow
 
+{-
 import           Control.Concurrent          (threadDelay)
 import           Data.Time
 import           Network.HTTP
-{-
 line1 :: (M a ~ IO,ArrowInit a) => a (String, String) ()
 line1 = [arrowInit| proc (n,g) -> do
     a <- getURLSum -< n
@@ -59,6 +57,8 @@ example1 = [arrowInit|
     |]
 
 
+---}
+
 example4 :: ArrowInit a => a Int Int
 example4 = [arrowInit|
      proc n -> do
@@ -68,7 +68,15 @@ example4 = [arrowInit|
         d <- arr (*2) -< a*1
         returnA -< n
             |]
----}
+example4b :: ArrowInit a => a Int Int
+example4b = [arrowG|
+     proc n -> do
+        a <- arr (+1) -< n
+        () <- returnA -< n
+        _ <- arr (*2) -< n+1
+        d <- arr (*2) -< a*1
+        returnA -< n
+            |]
 example2 :: ArrowInit a => a Int Int
 example2 = [arrowG|
     proc n -> do
@@ -76,7 +84,7 @@ example2 = [arrowG|
         e <-  arr (+2) -< n
         c <-  arr (+3) -< b
         d <-  arr (uncurry (+)) -< (c,e)
-        arr (uncurry (-)) -< (n,d)
+        arr (uncurry (-)) -< (d,n)
             |]
 
 {-

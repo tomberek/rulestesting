@@ -51,6 +51,7 @@ data AExp
   | LoopD ExpQ ExpQ -- loop with initialized feedback
   | Init ExpQ
   | Lft AExp
+  | Id
 
 infixl 1 :>>>
 infixl 1 :***
@@ -72,13 +73,16 @@ instance Show (ASyn m a b) where
 newtype ASyn (m :: * -> *) b c = AExp AExp
 
 instance Category (ASyn m) where
-    id = AExp (Arr [| id |])
+    --id = AExp (Arr [| id |])
+    id = AExp Id
     AExp g . AExp f = AExp (f :>>> g)
 instance Arrow (ASyn m) where
-    arr _ = error $ "ASyn arr not implemented"
+    arr _ = error "ASyn arr not implemented"
     first (AExp f) = AExp (First f)
     second (AExp f) = AExp (Arr swapE :>>> First f :>>> Arr swapE)
     (AExp f) *** (AExp g) = AExp (f :*** g)
+    --(AExp f) *** (AExp g) = AExp (First f :>>> Arr swapE :>>> First g :>>> Arr swapE)
+    --(AExp f) &&& (AExp g) = AExp (Arr dupE :>>> (First f :>>> Arr swapE :>>> First g :>>> Arr swapE))
     (AExp f) &&& (AExp g) = AExp (Arr dupE :>>> (f :*** g))
 instance ArrowLoop (ASyn m) where
     loop (AExp f) = AExp (Loop f)
@@ -110,6 +114,7 @@ type Traversal = AExp -> AExp
 imap :: Traversal -> Traversal
 imap h (First f) = First (h f)
 imap h (f :>>> g) = h f :>>> h g
+imap h (f :*** g) = (h f) :*** (h g) -- Added by TOM
 imap h (Loop f) = Loop (h f)
 imap h (Lft f) = Lft (h f)
 imap _ x = x
@@ -143,6 +148,9 @@ normOpt (AExp e) =
 
 -- | fromAExp converts AExp back to TH Exp structure.
 fromAExp :: AExp -> ExpQ
+fromAExp (f :*** Id) = appE [|first|] (fromAExp f) --Added by TOM
+fromAExp (Id :*** f) = appE [|second|] (fromAExp f) --Added by TOM
+fromAExp (Id) = [|id|]
 fromAExp (Arr f) = appE [|arr|] f
 fromAExp (First f) = appE [|first|] (fromAExp f)
 fromAExp (f :>>> g) = infixE (Just (fromAExp f)) [|(>>>)|] (Just (fromAExp g))
@@ -168,16 +176,25 @@ normalize (Loop (LoopD i f)) = LoopD i (traceE (juggleE `o` f `o` juggleE))
 normalize (First (LoopD i f)) = LoopD i (juggleE `o` (f `crossE` idE) `o` juggleE)
 normalize (Init i) = LoopD i swapE
 normalize (Arr f :>>> ArrM g) = ArrM [| $g . $f |]
-normalize (ArrM f :>>> Arr g) = ArrM [| (liftM $g) . $f |]
+normalize (ArrM f :>>> Arr g) = ArrM [| liftM $g . $f |]
 normalize (Loop (Arr f)) = Arr (traceE f) -- Not in original CCA. 2015-TB Added by TOM
 --normalize (First (ArrM f)) = ArrM ( f `crossME` [|return|] ) -- Added by TOM
 normalize (First (ArrM f)) = ArrM ( f `crossME` [|return|] ) -- Added by TOM
 -- Choice:
 normalize (Lft (Arr f)) = Arr (lftE f)
 normalize (Lft (LoopD i f)) = LoopD i (untagE `o` lftE f `o` tagE)
+normalize (f :>>> Id) = normalize f --Added by TOM
+normalize (Id :>>> f) = normalize f --Added by TOM
+normalize (Id :*** f) = normE (Arr swapE :>>> First f :>>> Arr swapE) --Added by TOM
+normalize (f :*** Id) = normE (First f) --Added by TOM
+normalize (First Id) = Id
+normalize (Lft Id) = Id
 -- All the other cases are unchanged.
-normalize ((f :>>> g) :>>> h) = normalize (f :>>> normalize (g :>>> h)) -- Added by TOM
-normalize (f :*** g) = normalize f :*** normalize g -- Added by TOM
+--normalize ((f :>>> g) :>>> h) = normalize (normalize f :>>> normalize (g :>>> h)) -- Added by TOM
+--normalize (f :*** (g)) = (normalize f) :*** (normalize g) -- Added by TOM
+--normalize (f :*** (Arr g)) = normE ((First f :>>> Arr swapE :>>> First (Arr g) :>>> Arr swapE))
+--normalize (Arr f :*** g) = normE ((First (Arr f) :>>> Arr swapE :>>> First g :>>> Arr swapE))
+--normalize (f :*** g) = normE $ (normE f) :*** (normE g) -- Added by TOM
 normalize e = e
 
 -- | Used to take the function produced by normOpt and process a stream.

@@ -7,25 +7,30 @@ import           Prelude                     hiding (id, (.))
 
 --import           Auto
 import           Control.Arrow
-import Control.Applicative
+
 import           Control.Arrow.Init
 import           Control.Arrow.Init.Optimize
-import           Control.Arrow.TH
+
 import           Examples
 
 main :: IO ()
 main = do
+    printCCA example4
+    putStrLn ""
+    printCCA $(normFixed example4)
+    putStrLn ""
+    let banana = snd $(normOpt example4)
+    print $ banana (5::Int)
     printCCA example2
     putStrLn ""
     printCCA $(normFixed example2)
     putStrLn ""
-    let banana = snd $(normOpt example2)
-    (runKleisli . runPKleisli) banana 5 >>= print . show
+    let b = snd $(normOpt example2)
+    print $ b (5::Int)
     --runAutoIO_ a ("http://www.google.com","http://www.cnn.com") >>= print . show
     --(runKleisli . runPKleisli) banana ("http://www.google.com","http://www.cnn.com") >>= print . show
     --(runKleisli . runPKleisli) example2 ("http://www.google.com","http://www.cnn.com") >>= print . show
     print "hi"
-
 {-}
 exampleOpt :: (Int, ((), Int) -> (Int, Int))
 exampleOpt = [arrowOpt|
