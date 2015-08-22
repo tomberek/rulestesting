@@ -35,6 +35,9 @@ import Data.Maybe
 import Debug.Trace
 import Control.Lens
 import Control.Applicative
+import Data.Generics.Schemes
+import Data.Generics.Aliases (mkT)
+import Data.Data
 
 type ArrowExp = ExpQ
 data NodeE =
@@ -48,7 +51,7 @@ makeLenses ''NodeE
 -- CCA optimization via `arr'` and `init'` usage.
 arrow :: QuasiQuoter
 arrow = QuasiQuoter {
-    quoteExp = \input -> case E.parseExpWithMode E.defaultParseMode{E.extensions=[E.EnableExtension E.Arrows]} input of
+    quoteExp = \input -> case E.parseExpWithMode E.defaultParseMode{E.extensions=[E.EnableExtension E.Arrows],E.fixities=Just (E.baseFixities)} input of
         E.ParseOk result -> Debug.Trace.trace (unlines $
                 [show $ topSort graph
                 ,show graph
@@ -95,16 +98,16 @@ buildExp intmap graph goals exps = buildExp intmap graph newGoals newExps
                 helper2 = catMaybes $ map (flip elemIndex $ getEV <$> exps') $ (transposeG graph) ^. ix flagged --indeces in exps of needed exps
                 reqExps = map ((Data.List.!!) exps') helper2
                 remainingExps = (Data.List.\\) exps' reqExps
-                newExps2 =replicate (max 1 $ length newGoals2) $ createExp reqExps
+                newExps2 =replicate (max 1 $ length newGoals2) $
+                                Expression flagged thisName thisPat $ createConnection reqExps thisExp currentArrow --createExp reqExps
                 createExp [] = Debug.Trace.trace ("no reqs for " ++ show flagged) $ Expression flagged thisName thisPat [| $currentArrow |]
-                createExp [(Expression v _ p e)] = Debug.Trace.trace ("one req for " ++ show flagged ++ " is " ++ show v) $
-                                   Expression flagged thisName thisPat [| $(patCorrection p thisExp e) >>> $currentArrow |]
+                createExp [Expression v _ p e] = Debug.Trace.trace ("one req for " ++ show flagged ++ " is " ++ show v) $
+                                  Expression flagged thisName thisPat [| $(patCorrection e p thisExp) >>> $currentArrow |]
                 -- fix the multi-case with patCorrection
                 createExp more = Expression flagged thisName thisPat [| $(foldl1 (&:&) createTuple) >>> $currentArrow |]
                 -- assumes that the vars are in a tuple, in order
                 createTuple = map getEE $ catMaybes $ map (flip Prelude.lookup $ zip (map getName reqExps) reqExps) $ freeVars thisExp
-                --createTupleFuncs = 
-                      where order = freeVars thisExp
+                    where order = freeVars thisExp
                 thisNode = intmap ! flagged
                 thisPat = thisNode ^. pat
                 thisExp = thisNode ^?! expr
@@ -113,12 +116,39 @@ buildExp intmap graph goals exps = buildExp intmap graph newGoals newExps
                     (x:_) -> x
                     _ -> E.Ident "ShouldBeFinalGoal"
 
+createConnection :: [Expression] -> E.Exp -> ArrowExp -> ExpQ
+createConnection []   thisExp arrowExp = [| $arrowExp |] -- should only be the original req. This doesn't visit literal signaled arrows. No SIDE EFFECTS?
+--createConnection []   thisExp arrowExp = [| arr (const $(returnQ $ toExp thisExp)) >>> $arrowExp |] -- for example: a literal needs no other expression for input
+--createConnection ex@[Expression _ _ pat@(E.PVar n) expr] thisExp@(E.Var qn) arrowExp | toName qn == toName n = [| $expr >>> $arrowExp |]
+createConnection exps thisExp arrowExp = defaultConnection exps thisExp arrowExp
+
+--defaultConnection exps thisExp arrowExp = [| $(foldl1 (&:&) inExps) >>> arr (\ $(returnQ . toPat $ tuplize inPats) -> $(returnQ $ toExp thisExp)) >>> $arrowExp |]
+defaultConnection :: [Expression] -> E.Exp -> ArrowExp -> ExpQ
+defaultConnection exps thisExp arrowExp = [| $(foldl1 (&:&) (getEE <$> exps))
+                                          >>> arr (\ $(returnQ . toPat $ tuplize $ getPattern <$> exps) -> $(returnQ $ toExp thisExp))
+                                          >>> $arrowExp |]
+                                          {-
+defaultConnection exps thisExp arrowExp = let
+        inExps = getEE <$> exps'
+        inPats = getPattern <$> exps'
+        exps' = catMaybes $ map (flip Prelude.lookup $ zip (map getName exps) exps) $ freeVars thisExp --reorder for easy tupling
+        removedIds e=
+            ifM (isId $ fixity <$> [| (\ $(returnQ . toPat $ tuplize $ getPattern <$> e) -> $(returnQ $ toExp thisExp))  |] )
+                                   arrowExp
+                                   [| arr (\ $(returnQ . toPat $ tuplize $ getPattern <$> e) -> $(returnQ $ toExp thisExp)) >>> $arrowExp |]
+        in [| $(foldl1 (&:&) inExps) >>> $(removedIds exps') |]
+                                          -}
+
+fixity :: Data a => a -> a
+fixity = everywhere' (mkT expf)
+    where expf (UInfixE l o r) = InfixE (Just l) o (Just r)
+          expf e = e
 -- | Creates an arr lambda if needed from pattern to expression
-patCorrection :: E.Pat -> E.Exp -> ExpQ -> ExpQ
-patCorrection (E.PVar n) e@(E.Var qn) e2 | toName qn == toName n = e2
-                      | otherwise = [| $e2 >>> arr (\ $(returnQ $ toPat $ E.PVar n) -> $(returnQ $ toExp e)) |]
-patCorrection p e@(E.App _ _) e2 = const id p [| $e2 >>> arr (\ $(returnQ $ toPat p) -> $(returnQ $ toExp e)) |] --const trick to "use" p argument
-patCorrection p e e2 = const id p [| $e2 >>> arr (\ $(returnQ $ toPat p) -> $(returnQ $ toExp e)) |]
+patCorrection :: ExpQ -> E.Pat -> E.Exp -> ExpQ
+patCorrection e2 (E.PVar n) e@(E.Var qn) | toName qn == toName n = e2
+                         | otherwise = [| $e2 >>> arr (\ $(returnQ $ toPat $ E.PVar n) -> $(returnQ $ toExp e)) |]
+patCorrection e2 p e@(E.App _ _) = const id p [| $e2 >>> arr (\ $(returnQ $ toPat p) -> $(returnQ $ toExp e)) |] --const trick to "use" p argument
+patCorrection e2 p e = const id p [| $e2 >>> arr (\ $(returnQ $ toPat p) -> $(returnQ $ toExp e)) |]
 
 (&:&) :: ExpQ -> ExpQ -> ExpQ
 expr1 &:& expr2 = uInfixE expr1 (varE $ mkName "&&&") expr2
@@ -146,7 +176,8 @@ makeEdge names ind node = if Set.null f then Nothing else Just (ind,view i node)
     where f = names `Set.intersection` (Set.fromList $ freeVars node)
 
 instance FreeVars NodeE where
-    freeVars ex = freeVars $ ex ^?! expr -- ProcN should return []
+    freeVars (ProcN _ _ _) = []
+    freeVars ex = freeVars $ ex ^?! expr --ProcN has no freeVars in non-existant expression
 instance FreeVars P where
     freeVars (P ex) = freeVars $ ex ^. pat
 

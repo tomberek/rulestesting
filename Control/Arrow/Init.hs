@@ -14,9 +14,9 @@ Portability :  MultiParamTypeClasses
 Originally from CCA package: <https://hackage.haskell.org/package/CCA-0.1.5.2>
 
 Added ArrowEffect in order to model effectful arrows.
+Adding Swap,Id,Dup,Diag for CCC normalization
 -}
 module Control.Arrow.Init where
-
 
 import           Control.Arrow
 import           Control.Category         (Category)

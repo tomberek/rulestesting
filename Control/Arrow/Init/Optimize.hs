@@ -52,12 +52,16 @@ data AExp
   | Init ExpQ
   | Lft AExp
   | Id
+  | Dup
+  | Swap
 
 infixl 1 :>>>
 infixl 1 :***
 
 instance Show AExp where
     show Id = "Id"
+    show Dup = "Dup"
+    show Swap = "Swap"
     show (Arr _) = "Arr"
     show (First f) = "First " ++ show f
     show (ArrM _) = "ArrM"
@@ -80,7 +84,7 @@ instance Category (ASyn m) where
 instance Arrow (ASyn m) where
     arr _ = error "ASyn arr not implemented"
     first (AExp f) = AExp (First f)
-    second (AExp f) = AExp (Arr swapE :>>> First f :>>> Arr swapE)
+    second (AExp f) = AExp (Swap :>>> First f :>>> Swap)
     (AExp f) *** (AExp g) = AExp (f :*** g)
     --(AExp f) *** (AExp g) = AExp (First f :>>> Arr swapE :>>> First g :>>> Arr swapE)
     --(AExp f) &&& (AExp g) = AExp (Arr dupE :>>> (First f :>>> Arr swapE :>>> First g :>>> Arr swapE))
@@ -149,6 +153,8 @@ normOpt (AExp e) =
 
 -- | fromAExp converts AExp back to TH Exp structure.
 fromAExp :: AExp -> ExpQ
+fromAExp (Swap :>>> First f :>>> Swap) = appE [|second|] (fromAExp f) --Added by TOM
+fromAExp (Swap :>>> (f :*** g) ) = infixE (Just (fromAExp g)) [|(***)|] (Just (fromAExp f)) --Added by TOM
 fromAExp (f :*** Id) = appE [|first|] (fromAExp f) --Added by TOM
 fromAExp (Id :*** f) = appE [|second|] (fromAExp f) --Added by TOM
 fromAExp (Id) = [|id|]
@@ -186,7 +192,7 @@ normalize (Lft (Arr f)) = Arr (lftE f)
 normalize (Lft (LoopD i f)) = LoopD i (untagE `o` lftE f `o` tagE)
 normalize (f :>>> Id) = normalize f --Added by TOM
 normalize (Id :>>> f) = normalize f --Added by TOM
-normalize (Id :*** f) = normE (Arr swapE :>>> First f :>>> Arr swapE) --Added by TOM
+normalize (Id :*** f) = normE (Swap :>>> First f :>>> Swap) --Added by TOM
 normalize (f :*** Id) = normE (First f) --Added by TOM
 normalize (First Id) = Id
 normalize (Lft Id) = Id

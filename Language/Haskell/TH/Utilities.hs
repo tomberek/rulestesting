@@ -1,18 +1,50 @@
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE TemplateHaskell #-}
 -- Miscellaneous utilities on ordinary Haskell syntax used by the arrow
 -- translator.
 
 module Language.Haskell.TH.Utilities(
     FreeVars(freeVars), DefinedVars(definedVars),
     failureFree, irrPat, paren, parenInfixArg,
-    tuple, tupleP,
+    tuple, tupleP, tuplize,
     times,
     hsQuote, hsSplice, quoteArr, quoteInit     -- for CCA
+    ,promote,isId,ifM,areExpAEq --for id detection
 ) where
 
 import           Data.Generics                (everywhere, mkT)
 import           Data.List
 import           Language.Haskell.Exts.Syntax
+import qualified Language.Haskell.TH as TH
+import           Language.Haskell.TH.Alpha
+import           Control.Monad
+
+tuplize [s] =s
+tuplize (s:ss) = PTuple Boxed [s, tuplize ss]
+
+-- | Like @if@, but where the test can be monadic.
+ifM :: Monad m => m Bool -> m a -> m a -> m a
+ifM b t f = do b <- b; if b then t else f
+
+isId :: TH.Q TH.Exp -> TH.Q Bool
+isId expr = liftM or $ mapM ( ($) (areExpAEq expr) ) [ [| \a -> a |]
+                                                      , [| \(a) -> (a)|]
+                                                      , [| \a -> (a)|]
+                                                      , [| \(a) -> a|]
+                                                      , [| \(a,b) -> (a,b)|]
+                                                      ]
+
+promote :: TH.Pat -> TH.Exp
+promote (TH.ConP _ [pat]) = promote pat
+promote (TH.ConP _ pats) = TH.TupE $ map promote pats
+promote (TH.VarP n) = TH.VarE n
+promote (TH.LitP n) = TH.LitE n
+promote (TH.TupP pats) = TH.TupE $ map promote pats
+promote (TH.ParensP pat) = TH.ParensE $ promote pat
+promote (TH.ListP pats) = TH.ListE $ map promote pats
+promote (TH.WildP) = TH.TupE []
+promote x = error $ "pattern promotion TODO" ++ show x
+
 
 -- The set of free variables in some construct.
 class FreeVars a where
