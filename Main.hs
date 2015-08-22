@@ -4,14 +4,9 @@ module Main where
 
 
 import           Prelude                     hiding (id, (.))
-
---import           Auto
-
-
-
 import           Control.Arrow.Init.Optimize
-
 import           Examples
+import Criterion.Main
 
 main :: IO ()
 main = do
