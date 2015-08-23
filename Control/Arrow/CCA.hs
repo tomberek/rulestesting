@@ -3,7 +3,7 @@
 {-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE TypeFamilies               #-}
 {- |
-Module      :  Control.Arrow.Delay
+Module      :  Control.Arrow.CCA
 Description :  ArrowDelay
 Copyright   :  (c) 2015 Thomas Bereknyei
 License     :  BSD3
