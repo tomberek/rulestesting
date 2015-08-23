@@ -15,14 +15,14 @@ module Auto where
 
 import           Control.Applicative
 import           Control.Arrow
-import           Control.Arrow.Init
-import           Control.Arrow.Init.Optimize
+import           Control.Arrow.CCA
+import           Control.Arrow.CCA.Optimize
 import           Control.Arrow.TH
 import           Control.Category
 import           Control.Concurrent.Async
 import           Control.Monad
 import           Control.Monad.Fix
-import           Prelude                     hiding (id, init, (.))
+import           Prelude                     hiding (id, (.))
 
 newtype AutoXIO a b = AutoXIO {runAutoXIO :: AutoX IO a b} deriving (Functor,Applicative,Category,Alternative,ArrowChoice,ArrowLoop)
 autoIO :: (a -> IO (Maybe b, AutoX IO a b)) -> AutoXIO a b
@@ -44,8 +44,8 @@ instance Arrow (AutoXIO) where
         ( (y1,a1') , (y2,a2') ) <- concurrently (runAutoIO a1 x) (runAutoIO a2 x)
         return (liftA2 (,) y1 y2, a1' &&& a2')
 
-instance ArrowInit (AutoXIO) where
-    init b = AutoXIO $ init b
+instance ArrowCCA (AutoXIO) where
+    delay b = AutoXIO $ delay b
     type M AutoXIO = IO
     arrM f = AutoXIO $ arrM f
 
@@ -130,8 +130,8 @@ instance MonadFix m => ArrowLoop (AutoX m) where
     loop a = AConsX $ \x -> do
          rec {(Just (y, d), a') <- runAutoX a (x, d)}
          return (Just y, loop a')
-instance MonadFix m => ArrowInit (AutoX m) where -- added 2015 TB
-    init b = AConsX $ \a -> return (Just b,init a)
+instance MonadFix m => ArrowCCA (AutoX m) where -- added 2015 TB
+    delay b = AConsX $ \a -> return (Just b,delay a)
     type M (AutoX m) = m
     arrM f = aConsM $ \x -> do
                    y <- f x

@@ -20,7 +20,7 @@ import Language.Haskell.Meta
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax
 import Language.Haskell.TH.Quote
-import Control.Arrow.Init
+import Control.Arrow.CCA
 import Control.Arrow
 import qualified Control.Category as Q
 import Data.List (mapAccumL,findIndices,elemIndex,(\\),(!!),delete,nub,find)
@@ -49,7 +49,7 @@ instance Show NodeE where
 makeLenses ''NodeE
 
 -- | A 'QuasiQuoter' that desugars proc-do notation and prepares for
--- CCA optimization via `arr'` and `init'` usage.
+-- CCA optimization via `arr'` and `delay'` usage.
 arrow :: QuasiQuoter
 arrow = QuasiQuoter {
     quoteExp = \input -> case E.parseExpWithMode E.defaultParseMode{E.extensions=[E.EnableExtension E.Arrows],E.fixities=Just (E.baseFixities)} input of
@@ -144,7 +144,7 @@ instance FreeVars NodeE where
 instance FreeVars P where
     freeVars (P ex) = freeVars $ ex ^. pat
 
--- | Replaces expressions of `arr`, `arrM`, `init`, and `returnA` with
+-- | Replaces expressions of `arr`, `arrM`, `delay`, and `returnA` with
 -- the versions that have their arguments lifted to TH.
 arrFixer :: Exp -> ExpQ
 arrFixer = rewriteM arg
@@ -153,8 +153,8 @@ arrFixer = rewriteM arg
             fmap Just [| arr' (returnQ $(lift e)) $(returnQ e) |]
         arg (AppE (VarE (Name (OccName "arrM") _)) e) =
             fmap Just [| arrM' (returnQ $(lift e)) $(returnQ e) |]
-        arg (AppE (VarE (Name (OccName "init") _)) e) =
-            fmap Just [| init' (returnQ $(lift e)) $(returnQ e) |]
+        arg (AppE (VarE (Name (OccName "delay") _)) e) =
+            fmap Just [| delay' (returnQ $(lift e)) $(returnQ e) |]
         arg (VarE (Name (OccName "returnA") _)) =
             fmap Just [| arr' (returnQ $([| id |] >>= lift)) id |]
         arg _ = return Nothing
