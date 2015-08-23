@@ -19,7 +19,7 @@ line1 = [arrow| proc (n,g) -> do
     _ <- arrM print -< a + c + d
     returnA -< ()
     |]
-
+---}
 processURL :: String -> IO String
 processURL a = do
     getCurrentTime >>= print
@@ -33,8 +33,8 @@ getURLSum = [arrow| (arrM processURL) >>> (arr length) |]
 line2 :: (M a ~ IO, ArrowInit a) => a (String,String) Int
 line2 = [arrow|
     proc (x,y) -> do
-        a <- getURLSum -< x
-        b <- getURLSum -< y
+        a <- getURLSum -< y
+        b <- getURLSum -< x
         returnA -< a+b
     |]
 line3 :: (M a ~ IO, ArrowInit a) => a (String,String) Int
@@ -43,19 +43,6 @@ line3 = [arrow|
     (c,d) <- getURLSum *** getURLSum -< a
     returnA -< c+d
     |]
-
-
-{- no implemented yet
-example1 :: ArrowInit a => a Int Int
-example1 = [arrow|
-    proc n -> do
-        a  <- arr (\x -> x) -< (n::Int)
-        rec
-            e <- arr (+1) -< a + (1::Int)
-        returnA -< a
-    |]
--}
-
 
 example4 :: ArrowInit a => a Int Int
 example4 = [arrow|
@@ -81,6 +68,20 @@ example2 = [arrow|
         d <-  arr (uncurry (+)) -< (c,e)
         arr (uncurry (-)) -< (n,d)
             |]
+---}
+---}
+
+{- no implemented yet
+example1 :: ArrowInit a => a Int Int
+example1 = [arrow|
+    proc n -> do
+        a  <- arr (\x -> x) -< (n::Int)
+        rec
+            e <- arr (+1) -< a + (1::Int)
+        returnA -< a
+    |]
+
+
 {-
 i :: ArrowInit a => a Int Int
 i = [arrow|
