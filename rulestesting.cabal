@@ -31,6 +31,8 @@ library
                        ,aeson
                        ,time
                        ,HTTP
+                       ,lens
+                       ,th-alpha
                        ,categories
   default-language:    Haskell2010
 
@@ -51,6 +53,8 @@ executable rulestesting
                        ,aeson
                        ,time
                        ,HTTP
+                       ,lens
+                       ,th-alpha
                        ,categories
   default-language:    Haskell2010
 
@@ -71,6 +75,8 @@ test-suite rulestesting-test
                        ,aeson
                        ,time
                        ,HTTP
+                       ,lens
+                       ,th-alpha
                        ,categories
   default-language:    Haskell2010
 
