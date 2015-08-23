@@ -25,7 +25,7 @@ import Control.Arrow
 import qualified Control.Category as Q
 import Data.List (mapAccumL,findIndices,elemIndex,(\\),(!!),delete,nub,find)
 import Data.Graph
-import Data.Tree
+
 import Data.IntMap hiding (map)
 import Data.Function
 import Language.Haskell.TH.Utilities
@@ -74,7 +74,7 @@ instance Show Expression where
   show (Expression v p _) = "Expression: " ++ show v ++ show p
 
 buildExp :: IntMap NodeE -> Graph -> [Vertex] -> [Expression] -> ExpQ
-buildExp (toList -> [(0,ProcN (-1) E.PWildCard _ expr)]) _ [0] [] = expr
+buildExp (toList -> [(0,ProcN (-1) E.PWildCard _ e)]) _ [0] [] = e
 buildExp _ _ [] [Expression _ _ e] = e
 buildExp _ _ [g] [Expression v _ e] | g==v = e
 buildExp (fst . findMax -> target) _ _ exps | elem target (map getEV exps) = getEE . fromJust $ Data.List.find ( (==) target . getEV) exps -- got target early, effects?
@@ -98,13 +98,13 @@ buildExp intmap graph goals exps = Debug.Trace.trace ("called " ++ show goals) $
                 thisNode = Debug.Trace.trace (show flagged ++ show intmap) $ intmap ^?! ix flagged
                 thisPat = Debug.Trace.trace (show "pats :" ++ show flagged) $ thisNode ^. pat
                 thisExp = Debug.Trace.trace (show flagged ++ "exp :" ++ show (reqExps)++ show thisPat)
-                         $ thisNode ^?! expr
-                currentArrow = Debug.Trace.trace (show "arr :" ++ show (flagged)) $ 
+                         $ thisNode ^. expr
+                currentArrow = Debug.Trace.trace (show "arr :" ++ show (flagged)) $
                             intmap ^?! ix flagged . arrowE
 
 createConnection :: Int -> [Expression] -> E.Exp -> ArrowExp -> ExpQ
-createConnection 0 [] expr arrowExp = [| $arrowExp |] -- should only be the original req. This doesn't visit literal signaled arrows. No SIDE EFFECTS?
-createConnection _ [] expr arrowExp = [| arr (\a -> $(returnQ $ toExp expr)) >>> $arrowExp |] -- should only be the original req. This doesn't visit literal signaled arrows. No SIDE EFFECTS?
+createConnection 0 [] _ arrowExp = [| $arrowExp |] -- should only be the original req. This doesn't visit literal signaled arrows. No SIDE EFFECTS?
+createConnection _ [] e arrowExp = [| arr (\a -> $(returnQ $ toExp e)) >>> $arrowExp |] -- should only be the original req. This doesn't visit literal signaled arrows. No SIDE EFFECTS?
 createConnection _ exps thisExp arrowExp = defaultConnection exps thisExp arrowExp
 
 defaultConnection :: [Expression] -> E.Exp -> ArrowExp -> ExpQ
@@ -124,8 +124,8 @@ process ps (E.Do statements) = (buildGr allNodes , fromAscList $ zip (view i <$>
         makeNodes ind (E.Qualifier (E.LeftArrApp (returnQ . toExp -> e1) e2)) = (ind+1,CmdN ind E.PWildCard e2 e1)
         --makeNodes ind (E.LetStmt (E.BDecls (E.PatBind _ p _ (E.UnGuardedRhs rhs) binds :[]))) = (ind+1,StmtN ind p rhs [| Q.id |])
         makeNodes _ _ = error "process can only process Generators and Qualifier in Do statements"
-process [] expr = (buildG (0,0) [] , singleton 0 $ ProcN (-1) E.PWildCard (E.List []) (returnQ $ toExp expr))
-process _ expr = error $ "does not process rec yet" ++ show expr
+process [] (returnQ . toExp -> e) = (buildG (0,0) [] , singleton 0 $ ProcN (-1) E.PWildCard (E.List []) e)
+process _ e = error $ "does not process rec yet" ++ show e
 
 buildGr :: [NodeE] -> Graph
 buildGr n = buildG (0,length n -1) $ makeEdges n

@@ -139,8 +139,8 @@ instance Show AExp where
     show (Arr _) = "Arr"
     show (First f) = "First " ++ show f
     show (Second f) = "Second " ++ show f
-    show (ArrFirst f) = "ArrFirst"
-    show (ArrSecond f) = "ArrSecond"
+    show (ArrFirst _) = "ArrFirst"
+    show (ArrSecond _) = "ArrSecond"
     show (ArrM _) = "ArrM"
     show (f :>>> g) = "(" ++ show f ++ " >>> " ++ show g ++ ")"
     show (f :*** g) = "[" ++ show f ++ " *** " ++ show g ++ "]"
@@ -218,7 +218,7 @@ normE = everywhere normalize
 normQ :: ASyn t t1 t2 -> Q Exp
 normQ (AExp e) = normalizeQ e >>= fromAExp >>= arrFixer
 normalizeQ :: AExp -> Q AExp
-normalizeQ input = L.rewriteM (normalizeJ normalize) input >>= L.rewriteM (normalizeJ normalizeA)
+normalizeQ input = L.rewriteM (normalizeJ normalize) input  >>= L.rewriteM (normalizeJ normalizeA)
 rules :: [(ExpQ, AExp)]
 rules = [ ([| \a -> a |],Id)
         , ([| id |],Id)
@@ -303,11 +303,12 @@ normalize (Init i) = LoopD i swapE
 normalize (Lft (Arr f)) = Arr (lftE f)
 normalize (Lft (LoopD i f)) = LoopD i (untagE `o` lftE f `o` tagE)
 
+normalize (Loop (Arr f)) = Arr (traceE f) -- Not in original CCA. 2015-TB Added by TOM
+
 normalize (Arr f :>>> ArrM g) = ArrM [| $g . $f |]
 normalize (ArrM f :>>> Arr g) = ArrM [| liftM $g . $f |]
-normalize (Loop (Arr f)) = Arr (traceE f) -- Not in original CCA. 2015-TB Added by TOM
-normalize (First (ArrM f)) = ArrM ( f `crossME` [|return|] ) -- Added by TOM
-normalize (Second (ArrM f)) = ArrM ( [|return|] `crossME` f ) -- Added by TOM
+normalize (First (ArrM f)) = ArrM ( f `crossME` [|return|] )
+normalize (Second (ArrM f)) = ArrM ( [|return|] `crossME` f )
 
 normalize (f :>>> Id) = f --Added by TOM
 normalize (Id :>>> f) = f --Added by TOM
@@ -337,7 +338,9 @@ normalize (Diag :>>> ArrFirst f :>>> Swap) = Diag :>>> ArrSecond f
 normalize (Diag :>>> (ArrFirst f :>>> Swap)) = Diag :>>> ArrSecond f
 normalize (Diag :>>> ArrSecond f :>>> Swap) = Diag :>>> ArrFirst f
 normalize (Diag :>>> (ArrSecond f :>>> Swap)) = Diag :>>> ArrFirst f
+
 normalize (f :>>> (g :>>> h)) = (f :>>> g) :>>> h -- Added by TOM
+normalize ((f :>>> g) :>>> h) = (f :>>> g) :>>> h -- Added by TOM
 
 -- | We presume that pure actions are fairly cheap to perform, thus not much to gain by ***
 normalize (Arr f :*** Arr g) = Arr $ f `crossE` g
