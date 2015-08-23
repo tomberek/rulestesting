@@ -11,12 +11,12 @@ main :: IO ()
 main = do
     printCCA example4b
     putStrLn ""
-    printCCA ( $(normFixed example4b) :: ASyn m Int Int)
+    printCCA ( $(normQ example4b) :: ASyn m Int Int)
     let banana = snd $(normOpt example4b)
     print $ banana (5::Int)
     printCCA example2
     putStrLn ""
-    printCCA ($(normFixed example2) :: ASyn m Int Int)
+    printCCA ($(normQ example2) :: ASyn m Int Int)
     putStrLn ""
     let b = snd $(normOpt example2)
     print $ b (5::Int)

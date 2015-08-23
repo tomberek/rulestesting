@@ -78,11 +78,10 @@ example4b = [arrow|
         d <- arr (*2) -< a + 1
         returnA -< a + n
             |]
-
 example2 :: ArrowInit a => a Int Int
 example2 = [arrow|
     proc n -> do
-        b <-  arr (+1) -< (n+2)*3
+        b <-  arr (+1) -< n+2*3
         e <-  arr (+2) -< n
         c <-  arr (+3) -< b
         d <-  arr (uncurry (+)) -< (c,e)

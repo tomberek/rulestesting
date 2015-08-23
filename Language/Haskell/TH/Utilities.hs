@@ -9,7 +9,7 @@ module Language.Haskell.TH.Utilities(
     tuple, tupleP, tuplize,
     times,
     hsQuote, hsSplice, quoteArr, quoteInit     -- for CCA
-    ,promote,isId,ifM,areExpAEq --for id detection
+    ,promote,ifM,areExpAEq,expEqual --for id detection
 ) where
 
 import           Data.Generics                (everywhere, mkT)
@@ -25,14 +25,6 @@ tuplize (s:ss) = PTuple Boxed [s, tuplize ss]
 -- | Like @if@, but where the test can be monadic.
 ifM :: Monad m => m Bool -> m a -> m a -> m a
 ifM b t f = do b <- b; if b then t else f
-
-isId :: TH.Q TH.Exp -> TH.Q Bool
-isId expr = liftM or $ mapM ( ($) (areExpAEq expr) ) [ [| \a -> a |]
-                                                      , [| \(a) -> (a)|]
-                                                      , [| \a -> (a)|]
-                                                      , [| \(a) -> a|]
-                                                      , [| \(a,b) -> (a,b)|]
-                                                      ]
 
 promote :: TH.Pat -> TH.Exp
 promote (TH.ConP _ [pat]) = promote pat

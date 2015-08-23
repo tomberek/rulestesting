@@ -138,11 +138,6 @@ defaultConnection exps thisExp arrowExp = let
                                    [| arr (\ $(returnQ . toPat $ tuplize $ getPattern <$> e) -> $(returnQ $ toExp thisExp)) >>> $arrowExp |]
         in [| $(foldl1 (&:&) inExps) >>> $(removedIds exps') |]
                                           -}
-
-fixity :: Data a => a -> a
-fixity = everywhere' (mkT expf)
-    where expf (UInfixE l o r) = InfixE (Just l) o (Just r)
-          expf e = e
 -- | Creates an arr lambda if needed from pattern to expression
 patCorrection :: ExpQ -> E.Pat -> E.Exp -> ExpQ
 patCorrection e2 (E.PVar n) e@(E.Var qn) | toName qn == toName n = e2

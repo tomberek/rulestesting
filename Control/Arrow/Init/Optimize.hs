@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE GADTs                 #-}
 {-# LANGUAGE KindSignatures        #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
@@ -15,7 +16,7 @@ Portability :  GADTs,TemplateHaskell,MultiParamTypesClasses
 Originally from CCA package: <https://hackage.haskell.org/package/CCA-0.1.5.2>
 -}
 module Control.Arrow.Init.Optimize
-    (norm, normOpt, normFixed, fromAExp, normalize, normE,
+    (normQ,norm, normOpt, normFixed, fromAExp, normalize, normE,
     runCCNF, nth', runIt,
     pprNorm, pprNormOpt, printCCA, ASyn(..),AExp(..),ArrowInit(..),
     --cross, dup, swap, assoc, unassoc, juggle, trace, mirror, untag, tagT, untagT,
@@ -29,9 +30,15 @@ import           Control.Arrow
 import           Control.Arrow.Init
 import           Control.Arrow.TH
 import           Control.Monad --was just liftM
+import           Control.Applicative
+import qualified Data.Semifunctor.Braided as CCC
 import           Data.Char           (isAlpha)
 import           Language.Haskell.TH
+import           Language.Haskell.TH.Utilities
+import qualified Control.Lens as L
 import qualified Debug.Trace
+import Data.Data
+import Data.Typeable
 
 import qualified Data.Generics       as G (everywhere, mkT)
 -- Internal Representation
@@ -42,19 +49,54 @@ data AExp
   = Arr ExpQ
   | First AExp
   | AExp :>>> AExp
-
   | ArrM ExpQ -- added to allow arrows with side effects
-
   | AExp :*** AExp -- added to prevent premature optimization? or to allow it?
-
   | Loop AExp
   | LoopD ExpQ ExpQ -- loop with initialized feedback
   | Init ExpQ
   | Lft AExp
-  | Id
+  | Id -- This and below added for CCC
   | Dup
   | Swap
+  
+instance L.Plated AExp where
+    plate f (First e) = First <$> f e
+    plate f (a :>>> b) = (:>>>) <$> f a <*> f b
+    plate f (a :*** b) = (:***) <$> f a <*> f b
+    plate f (Loop e) = Loop <$> f e
+    plate f (Lft e) = Lft <$> f e
+    plate _ e = pure e
 
+areExpAEq' f g = do
+    f' <- f >>= return . fixity
+    g' <- g >>= return . fixity
+    case f' of
+        UInfixE _ _ _ -> return False
+        otherwise -> case g' of
+            UInfixE _ _ _ -> return False
+            otherwise -> expEqual f' g'
+
+fixity :: Data a => a -> a
+fixity = G.everywhere (G.mkT expf)
+    where expf (UInfixE l o r) = InfixE (Just l) o (Just r)
+          expf e = e
+
+eqM :: AExp -> AExp -> Q Bool
+eqM (Arr f) (Arr g) = areExpAEq' f g
+eqM (First f) (First g) = eqM f g
+eqM (f :>>> g) (h :>>> i) = (&&) <$> (eqM f h) <*> (eqM g i)
+eqM (ArrM f) (ArrM g) = areExpAEq' f g
+eqM (f :*** g) (h :*** i) = (&&) <$> (eqM f h) <*> (eqM g i)
+eqM (Loop f) (Loop g) = eqM f g
+eqM (LoopD f g) (LoopD h i) = (&&) <$> (areExpAEq' f h) <*> (areExpAEq' g i)
+eqM (Init f) (Init g) = areExpAEq' f g
+eqM (Lft f) (Lft g) = eqM f g
+eqM Id Id = return True
+eqM Dup Dup = return True
+eqM Swap Swap = return True
+eqM _ _ = return False
+
+-- make sure this matches canonical
 infixl 1 :>>>
 infixl 1 :***
 
@@ -137,19 +179,45 @@ norm (AExp e) = fromAExp (normE e)
 normE :: Traversal
 normE = everywhere normalize
 
+normQ (AExp e) = L.rewriteM normalizeJ e >>= fromAExp >>= arrFixer
+normalizeQ = L.rewriteM normalizeJ
+isId :: ExpQ -> Q Bool
+isId expr = liftM or $ mapM ( ($) (areExpAEq' expr) ) [ [| \a -> a |]
+                                                       , [| \(a,b) -> (a,b)|]
+                                                       ]
+rules = [ ([| \a -> a |],Id)
+        , ([| \(a,b) -> (a,b)|],Id)
+        , ([| \(a,b) -> (b,a)|],Swap)
+        ]
+rewriteArr :: AExp -> Q (Maybe AExp)
+rewriteArr (Arr e) = findM ( ($) (\(a,b) -> ifM (areExpAEq' e a) (return $ Just b) $ return Nothing)) rules
+
+findM f = foldr test (return Nothing)
+    where test x m = do
+              curr <- f x
+              case curr of
+                  Just _  -> return curr
+                  Nothing -> m
+
+normalizeJ :: AExp -> Q (Maybe AExp)
+normalizeJ (Arr e) = findM ( ($) (\(a,b) -> ifM (areExpAEq' e a) (return $ Just b) $ return Nothing)) rules
+normalizeJ e = ifM (eqM e n) (return Nothing) (return $ Just n)
+    where n = normalize e
+
 normFixed :: ASyn m a b -> ExpQ
 normFixed f = norm f >>= arrFixer
 -- normOpt returns the pair of state and pure function as (i, f) from optimized
 -- CCNF in the form loopD i (arr f).
 normOpt :: ASyn m a b -> ExpQ      -- returns a pair of state and pure function (s, f)
-normOpt (AExp e) =
-  case normE e of
-    LoopD i f -> tupE [i, f]
-    Arr f     -> [| ( (), $(f) ) |]
-    ArrM f  -> [| ( (), $(f) ) |]
-    g -> [| ( (), $(fromAExp g) ) |]
-    --g -> error $ "Perhaps not causual? Can't optimize past: " ++ show g
-    -- _         -> error $ "The given arrow can't be normalized to optimized CCNF."
+normOpt (AExp e) = do
+    e' <- normalizeQ e
+    case e' of
+      LoopD i f -> tupE [i, f]
+      Arr f     -> [| ( (), $(f) ) |]
+      ArrM f  -> [| ( (), $(f) ) |]
+      g -> [| ( (), $(fromAExp g) ) |]
+      --g -> error $ "Perhaps not causual? Can't optimize past: " ++ show g
+      -- _         -> error $ "The given arrow can't be normalized to optimized CCNF."
 
 -- | fromAExp converts AExp back to TH Exp structure.
 fromAExp :: AExp -> ExpQ
@@ -158,6 +226,7 @@ fromAExp (Swap :>>> (f :*** g) ) = infixE (Just (fromAExp g)) [|(***)|] (Just (f
 fromAExp (f :*** Id) = appE [|first|] (fromAExp f) --Added by TOM
 fromAExp (Id :*** f) = appE [|second|] (fromAExp f) --Added by TOM
 fromAExp (Id) = [|id|]
+fromAExp (Swap) = [| arr swap |]
 fromAExp (Arr f) = appE [|arr|] f
 fromAExp (First f) = appE [|first|] (fromAExp f)
 fromAExp (f :>>> g) = infixE (Just (fromAExp f)) [|(>>>)|] (Just (fromAExp g))
@@ -167,11 +236,10 @@ fromAExp (ArrM i) = appE [|arrM|] i
 fromAExp (Init i) = appE [|init|] i
 fromAExp (Lft f) = appE [|left|] (fromAExp f)
 fromAExp (f :*** g) = infixE (Just (fromAExp f)) [|(***)|] (Just (fromAExp g)) -- Not in original CCA. 2015-TB
-
 -- CCNF
 -- ====
 
--- Arrow laws:
+-- Arrow and CCA laws:
 normalize :: AExp -> AExp
 normalize (Arr f :>>> Arr g) = Arr (g `o` f)
 normalize (First (Arr f)) = Arr (f `crossE` idE)
