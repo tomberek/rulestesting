@@ -21,7 +21,6 @@ line1 = [arrow| proc (n,g) -> do
     returnA -< ()
     |]
 ---}
-
 processURL :: String -> IO String
 processURL a = do
     getCurrentTime >>= print
@@ -35,8 +34,8 @@ getURLSum = [arrow| (arrM processURL) >>> (arr length) |]
 line2 :: (M a ~ IO, ArrowCCA a) => a (String,String) Int
 line2 = [arrow|
     proc (x,y) -> do
-        a <- getURLSum -< x
-        b <- getURLSum -< y
+        a <- getURLSum -< y
+        b <- getURLSum -< x
         returnA -< a+b
     |]
 {-
@@ -46,6 +45,7 @@ line3 = [arrow|
     (c,d) <- getURLSum *** getURLSum -< a
     returnA -< c+d
     |]
+<<<<<<< HEAD
 ---}
 
 {- no implemented yet
@@ -84,6 +84,20 @@ example2 = [arrow|
         d <-  arr (uncurry (+)) -< (c,e)
         arr (uncurry (-)) -< (n,d)
             |]
+---}
+---}
+
+{- no implemented yet
+example1 :: ArrowInit a => a Int Int
+example1 = [arrow|
+    proc n -> do
+        a  <- arr (\x -> x) -< (n::Int)
+        rec
+            e <- arr (+1) -< a + (1::Int)
+        returnA -< a
+    |]
+
+
 {-
 i :: ArrowCCA a => a Int Int
 i = [arrow|

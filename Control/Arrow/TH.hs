@@ -16,6 +16,8 @@ Portability :  TemplateHaskell,QuasiQuotes,ViewPatterns
 -}
 module Control.Arrow.TH (arrow,arrFixer) where
 import qualified Language.Haskell.Exts as E
+import Prelude hiding ((.))
+import Control.Category
 import Language.Haskell.Meta
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax
@@ -27,7 +29,7 @@ import Data.List (mapAccumL,findIndices,elemIndex,(\\),(!!),delete,nub,find)
 import Data.Graph
 
 import Data.IntMap hiding (map)
-import Data.Function
+import Data.Function(on)
 import Language.Haskell.TH.Utilities
 import qualified Data.Set as Set
 import Data.Maybe
@@ -116,7 +118,7 @@ defaultConnection exps thisExp arrowExp = [| $(foldl1 (&:&) (getEE <$> exps))
 expr1 &:& expr2 = uInfixE expr1 (varE $ mkName "&&&") expr2
 
 process :: [NodeE] -> E.Exp -> (Graph,IntMap NodeE)
-process ps (E.Proc _ b c) = process (ProcN 0 b (E.List []) [|Q.id|] : ps) c
+process ps (E.Proc _ b c) = Debug.Trace.trace (show b) $ process (ProcN 0 b (E.List []) [|Q.id|] : ps) c
 process ps (E.Do statements) = (buildGr allNodes , fromAscList $ zip (view i <$> allNodes) allNodes)
     where
         allNodes = ps ++ (snd $ mapAccumL makeNodes 1 statements)
@@ -156,5 +158,5 @@ arrFixer = rewriteM arg
         arg (AppE (VarE (Name (OccName "delay") _)) e) =
             fmap Just [| delay' (returnQ $(lift e)) $(returnQ e) |]
         arg (VarE (Name (OccName "returnA") _)) =
-            fmap Just [| arr' (returnQ $([| id |] >>= lift)) id |]
+            fmap Just [| arr' (returnQ $([| Q.id |] >>= lift)) Q.id |]
         arg _ = return Nothing
