@@ -19,7 +19,6 @@ import qualified Language.Haskell.Exts as E
 import Language.Haskell.Meta
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax
-
 import Language.Haskell.TH.Quote
 import Control.Arrow.Init
 import Control.Arrow
@@ -35,9 +34,6 @@ import Data.Maybe
 import Debug.Trace
 import Control.Lens
 import Control.Applicative
-import Data.Generics.Schemes
-import Data.Generics.Aliases (mkT)
-import Data.Data
 
 type ArrowExp = ExpQ
 data NodeE =
@@ -73,15 +69,15 @@ instance Eq NodeE where
 instance Ord NodeE where
     compare = compare `on` view i
 
-data Expression = Expression {getEV::Vertex,getName::E.Name,getPattern::E.Pat,getEE::ExpQ}
+data Expression = Expression {getEV::Vertex,getPattern::E.Pat,getEE::ExpQ}
 instance Eq Expression where
      (==) = (==) `on` getEV
 instance Show Expression where
-  show (Expression v n _ _) = "Expression: " ++ show v ++ " named: " ++ show n
+  show (Expression v p _) = "Expression: " ++ show v ++ show p
 
 buildExp :: IntMap NodeE -> Graph -> [Vertex] -> [Expression] -> ExpQ
-buildExp _ _ [] [Expression _ _ _ e] = e
-buildExp _ _ [g] [Expression v _ _ e] | g==v = e
+buildExp _ _ [] [Expression _ _ e] = e
+buildExp _ _ [g] [Expression v _ e] | g==v = e
 buildExp (fst . findMax -> target) _ _ exps | elem target (map getEV exps) = getEE . fromJust $ Data.List.find ( (==) target . getEV) exps -- got target early, effects?
 buildExp _ _ [] _ = error "multiple expressions, no goals"
 buildExp intmap graph goals exps = buildExp intmap graph newGoals newExps
@@ -99,51 +95,20 @@ buildExp intmap graph goals exps = buildExp intmap graph newGoals newExps
                 reqExps = map ((Data.List.!!) exps') helper2
                 remainingExps = (Data.List.\\) exps' reqExps
                 newExps2 =replicate (max 1 $ length newGoals2) $
-                                Expression flagged thisName thisPat $ createConnection reqExps thisExp currentArrow --createExp reqExps
-                createExp [] = Debug.Trace.trace ("no reqs for " ++ show flagged) $ Expression flagged thisName thisPat [| $currentArrow |]
-                createExp [Expression v _ p e] = Debug.Trace.trace ("one req for " ++ show flagged ++ " is " ++ show v) $
-                                  Expression flagged thisName thisPat [| $(patCorrection e p thisExp) >>> $currentArrow |]
-                -- fix the multi-case with patCorrection
-                createExp more = Expression flagged thisName thisPat [| $(foldl1 (&:&) createTuple) >>> $currentArrow |]
-                -- assumes that the vars are in a tuple, in order
-                createTuple = map getEE $ catMaybes $ map (flip Prelude.lookup $ zip (map getName reqExps) reqExps) $ freeVars thisExp
-                    where order = freeVars thisExp
+                                Expression flagged thisPat $ createConnection reqExps thisExp currentArrow --createExp reqExps
                 thisNode = intmap ! flagged
                 thisPat = thisNode ^. pat
                 thisExp = thisNode ^?! expr
                 currentArrow = intmap ^?! ix flagged . arrowE
-                thisName = case freeVars thisPat of
-                    (x:_) -> x
-                    _ -> E.Ident "ShouldBeFinalGoal"
 
 createConnection :: [Expression] -> E.Exp -> ArrowExp -> ExpQ
-createConnection []   thisExp arrowExp = [| $arrowExp |] -- should only be the original req. This doesn't visit literal signaled arrows. No SIDE EFFECTS?
---createConnection []   thisExp arrowExp = [| arr (const $(returnQ $ toExp thisExp)) >>> $arrowExp |] -- for example: a literal needs no other expression for input
---createConnection ex@[Expression _ _ pat@(E.PVar n) expr] thisExp@(E.Var qn) arrowExp | toName qn == toName n = [| $expr >>> $arrowExp |]
+createConnection []   _ arrowExp = [| $arrowExp |] -- should only be the original req. This doesn't visit literal signaled arrows. No SIDE EFFECTS?
 createConnection exps thisExp arrowExp = defaultConnection exps thisExp arrowExp
 
---defaultConnection exps thisExp arrowExp = [| $(foldl1 (&:&) inExps) >>> arr (\ $(returnQ . toPat $ tuplize inPats) -> $(returnQ $ toExp thisExp)) >>> $arrowExp |]
 defaultConnection :: [Expression] -> E.Exp -> ArrowExp -> ExpQ
 defaultConnection exps thisExp arrowExp = [| $(foldl1 (&:&) (getEE <$> exps))
                                           >>> arr (\ $(returnQ . toPat $ tuplize $ getPattern <$> exps) -> $(returnQ $ toExp thisExp))
                                           >>> $arrowExp |]
-                                          {-
-defaultConnection exps thisExp arrowExp = let
-        inExps = getEE <$> exps'
-        inPats = getPattern <$> exps'
-        exps' = catMaybes $ map (flip Prelude.lookup $ zip (map getName exps) exps) $ freeVars thisExp --reorder for easy tupling
-        removedIds e=
-            ifM (isId $ fixity <$> [| (\ $(returnQ . toPat $ tuplize $ getPattern <$> e) -> $(returnQ $ toExp thisExp))  |] )
-                                   arrowExp
-                                   [| arr (\ $(returnQ . toPat $ tuplize $ getPattern <$> e) -> $(returnQ $ toExp thisExp)) >>> $arrowExp |]
-        in [| $(foldl1 (&:&) inExps) >>> $(removedIds exps') |]
-                                          -}
--- | Creates an arr lambda if needed from pattern to expression
-patCorrection :: ExpQ -> E.Pat -> E.Exp -> ExpQ
-patCorrection e2 (E.PVar n) e@(E.Var qn) | toName qn == toName n = e2
-                         | otherwise = [| $e2 >>> arr (\ $(returnQ $ toPat $ E.PVar n) -> $(returnQ $ toExp e)) |]
-patCorrection e2 p e@(E.App _ _) = const id p [| $e2 >>> arr (\ $(returnQ $ toPat p) -> $(returnQ $ toExp e)) |] --const trick to "use" p argument
-patCorrection e2 p e = const id p [| $e2 >>> arr (\ $(returnQ $ toPat p) -> $(returnQ $ toExp e)) |]
 
 (&:&) :: ExpQ -> ExpQ -> ExpQ
 expr1 &:& expr2 = uInfixE expr1 (varE $ mkName "&&&") expr2
@@ -155,8 +120,8 @@ process ps (E.Do statements) = (buildGr $ allNodes,fromAscList $ zip (view i <$>
         allNodes = ps ++ (snd $ mapAccumL makeNodes 1 statements)
         makeNodes ind (E.Generator _ p (E.LeftArrApp (returnQ . toExp -> e1) e2)) = (ind+1,StmtN ind p e2 e1)
         makeNodes ind (E.Qualifier (E.LeftArrApp (returnQ . toExp -> e1) e2)) = (ind+1,CmdN ind E.PWildCard e2 e1)
-        makeNodes ind (E.LetStmt (E.BDecls (E.PatBind _ p _ (E.UnGuardedRhs rhs) binds :[]))) = (ind+1,StmtN ind p rhs [| Q.id |])
-        makeNodes _ _ = error "process can only process Generators and Qualifier in Do statements, only one let stms"
+        --makeNodes ind (E.LetStmt (E.BDecls (E.PatBind _ p _ (E.UnGuardedRhs rhs) binds :[]))) = (ind+1,StmtN ind p rhs [| Q.id |])
+        makeNodes _ _ = error "process can only process Generators and Qualifier in Do statements"
 process _ _ = error "does not process rec yet"
 
 buildGr :: [NodeE] -> Graph

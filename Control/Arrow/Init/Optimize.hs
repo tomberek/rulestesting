@@ -1,3 +1,4 @@
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE GADTs                 #-}
 {-# LANGUAGE KindSignatures        #-}
@@ -16,7 +17,7 @@ Portability :  GADTs,TemplateHaskell,MultiParamTypesClasses
 Originally from CCA package: <https://hackage.haskell.org/package/CCA-0.1.5.2>
 -}
 module Control.Arrow.Init.Optimize
-    (normQ,norm, normOpt, normFixed, fromAExp, normalize, normE,
+    (normQ,norm, normOpt, fromAExp, normalize, normE,
     runCCNF, nth', runIt,
     pprNorm, pprNormOpt, printCCA, ASyn(..),AExp(..),ArrowInit(..),
     --cross, dup, swap, assoc, unassoc, juggle, trace, mirror, untag, tagT, untagT,
@@ -31,14 +32,13 @@ import           Control.Arrow.Init
 import           Control.Arrow.TH
 import           Control.Monad --was just liftM
 import           Control.Applicative
-import qualified Data.Semifunctor.Braided as CCC
 import           Data.Char           (isAlpha)
 import           Language.Haskell.TH
 import           Language.Haskell.TH.Utilities
 import qualified Control.Lens as L
 import qualified Debug.Trace
 import Data.Data
-import Data.Typeable
+
 
 import qualified Data.Generics       as G (everywhere, mkT)
 -- Internal Representation
@@ -56,7 +56,8 @@ data AExp
   | Init ExpQ
   | Lft AExp
 
-  | ArrList [AExp]
+  | ArrFirst ExpQ
+  | ArrSecond ExpQ
   | Id -- This and below added for Symetric Cartesian (not monoidal)
   | Diag
   | Fst
@@ -65,7 +66,7 @@ data AExp
   | Disassociate
   | Swap
   | Second AExp
-  -- Closed, not needed
+  {- Closed, not needed
   | Apply -- (f,a) = f a   arr (\(f,a)->f a)
   | Curry
   | Uncurry
@@ -74,6 +75,7 @@ data AExp
   | Idl
   | Coidl
   | Coidr
+  -}
 
 instance L.Plated AExp where
     plate f (First e) = First <$> f e
@@ -84,30 +86,33 @@ instance L.Plated AExp where
     plate f (Lft e) = Lft <$> f e
     plate _ e = pure e
 
+areExpAEq' :: Q Exp -> Q Exp -> Q Bool
 areExpAEq' f g = do
-    f' <- f >>= return . fixity
-    g' <- g >>= return . fixity
+    f' <- liftM fixity f
+    g' <- liftM fixity g
     case f' of
-        UInfixE _ _ _ -> return False
-        otherwise -> case g' of
-            UInfixE _ _ _ -> return False
-            otherwise -> expEqual f' g'
+        UInfixE {} -> return False
+        _ -> case g' of
+             UInfixE {} -> return False
+             _ -> expEqual f' g'
 
 fixity :: Data a => a -> a
 fixity = G.everywhere (G.mkT expf)
-    where expf (UInfixE l o r) = InfixE (Just l) o (Just r)
+    where expf (UInfixE l op r) = InfixE (Just l) op (Just r)
           expf e = e
 
 -- | Used to measure progres for normalization using rewriteM
 eqM :: AExp -> AExp -> Q Bool
 eqM (Arr f) (Arr g) = areExpAEq' f g
+eqM (ArrFirst f) (ArrFirst g) = areExpAEq' f g
+eqM (ArrSecond f) (ArrSecond g) = areExpAEq' f g
 eqM (First f) (First g) = eqM f g
 eqM (Second f) (Second g) = eqM f g
-eqM (f :>>> g) (h :>>> i) = (&&) <$> (eqM f h) <*> (eqM g i)
+eqM (f :>>> g) (h :>>> i) = (&&) <$> eqM f h <*> eqM g i
 eqM (ArrM f) (ArrM g) = areExpAEq' f g
-eqM (f :*** g) (h :*** i) = (&&) <$> (eqM f h) <*> (eqM g i)
+eqM (f :*** g) (h :*** i) = (&&) <$> eqM f h <*> eqM g i
 eqM (Loop f) (Loop g) = eqM f g
-eqM (LoopD f g) (LoopD h i) = (&&) <$> (areExpAEq' f h) <*> (areExpAEq' g i)
+eqM (LoopD f g) (LoopD h i) = (&&) <$> areExpAEq' f h <*> areExpAEq' g i
 eqM (Init f) (Init g) = areExpAEq' f g
 eqM (Lft f) (Lft g) = eqM f g
 eqM Id Id = return True
@@ -117,7 +122,6 @@ eqM Snd Snd = return True
 eqM Associate Associate = return True
 eqM Disassociate Disassociate = return True
 eqM Swap Swap = return True
-eqM (ArrList as) (ArrList bs) = liftM and $ zipWithM eqM as bs
 eqM _ _ = return False
 
 -- make sure this matches canonical
@@ -128,8 +132,15 @@ instance Show AExp where
     show Id = "Id"
     show Diag = "Diag"
     show Swap = "Swap"
+    show Fst = "Fst"
+    show Snd = "Snd"
+    show Associate = "Associate"
+    show Disassociate = "Disassociate"
     show (Arr _) = "Arr"
     show (First f) = "First " ++ show f
+    show (Second f) = "Second " ++ show f
+    show (ArrFirst f) = "ArrFirst"
+    show (ArrSecond f) = "ArrSecond"
     show (ArrM _) = "ArrM"
     show (f :>>> g) = "(" ++ show f ++ " >>> " ++ show g ++ ")"
     show (f :*** g) = "[" ++ show f ++ " *** " ++ show g ++ "]"
@@ -204,12 +215,11 @@ norm (AExp e) = fromAExp (normE e)
 normE :: Traversal
 normE = everywhere normalize
 
-normQ (AExp e) = L.rewriteM normalizeJ e >>= fromAExp >>= arrFixer
-normalizeQ = L.rewriteM normalizeJ
-isId :: ExpQ -> Q Bool
-isId expr = liftM or $ mapM ( ($) (areExpAEq' expr) ) [ [| \a -> a |]
-                                                       , [| \(a,b) -> (a,b)|]
-                                                       ]
+normQ :: ASyn t t1 t2 -> Q Exp
+normQ (AExp e) = normalizeQ e >>= fromAExp >>= arrFixer
+normalizeQ :: AExp -> Q AExp
+normalizeQ input = L.rewriteM (normalizeJ normalize) input >>= L.rewriteM (normalizeJ normalizeA)
+rules :: [(ExpQ, AExp)]
 rules = [ ([| \a -> a |],Id)
         , ([| id |],Id)
         , ([| \(a,b) -> (a,b)|],Id)
@@ -224,9 +234,8 @@ rules = [ ([| \a -> a |],Id)
         , ([| \(a,(b,c)) -> ((a,b),c)|],Disassociate)
         , ([| \((a,b),c) -> (a,(b,c))|],Associate) -- so far only first levels
         ]
-rewriteArr :: AExp -> Q (Maybe AExp)
-rewriteArr (Arr e) = findM ( ($) (\(a,b) -> ifM (areExpAEq' e a) (return $ Just b) $ return Nothing)) rules
 
+findM :: Monad m => (a -> m (Maybe t)) -> [a] -> m (Maybe t)
 findM f = foldr test (return Nothing)
     where test x m = do
               curr <- f x
@@ -234,13 +243,11 @@ findM f = foldr test (return Nothing)
                   Just _  -> return curr
                   Nothing -> m
 
-normalizeJ :: AExp -> Q (Maybe AExp)
-normalizeJ (Arr e) = findM ( ($) (\(a,b) -> ifM (areExpAEq' e a) (return $ Just b) $ return Nothing)) rules
-normalizeJ e = ifM (eqM e n) (return Nothing) (return $ Just n)
-    where n = normalize e
+normalizeJ :: (AExp -> AExp) -> AExp ->  Q (Maybe AExp)
+normalizeJ _ (Arr e) = findM (\(a,b) -> ifM (areExpAEq' e a) (return $ Just b) $ return Nothing) rules
+normalizeJ normRules e = ifM (eqM e n) (return Nothing) (return $ Just n)
+    where n = normRules e
 
-normFixed :: ASyn m a b -> ExpQ
-normFixed f = norm f >>= arrFixer
 -- normOpt returns the pair of state and pure function as (i, f) from optimized
 -- CCNF in the form loopD i (arr f).
 normOpt :: ASyn m a b -> ExpQ      -- returns a pair of state and pure function (s, f)
@@ -256,9 +263,6 @@ normOpt (AExp e) = do
 
 -- | fromAExp converts AExp back to TH Exp structure.
 fromAExp :: AExp -> ExpQ
---fromAExp (Swap :>>> First f :>>> Swap) = appE [|second|] (fromAExp f) --Added by TOM
---fromAExp (Diag :>>> First f :>>> Swap) = fromAExp $ Diag :>>> Second f --Added by TOM
-
 fromAExp (Second f) = appE [|second|] (fromAExp f)
 fromAExp Id = [|id|]
 fromAExp Diag = [| arr dup |]
@@ -267,16 +271,11 @@ fromAExp Snd = [| arr snd |]
 fromAExp Associate = [| arr (\((a,b),c)->(a,(b,c))) |]
 fromAExp Disassociate = [| arr (\(a,(b,c))->((a,b),c)) |]
 fromAExp Swap = [| arr swap |]
-
-fromAExp (ArrList [Arr f]) = f --at least two things in ArrList
-fromAExp (ArrList [Id]) = [|id|]
-fromAExp (ArrList [Diag]) = [|dup|]
-fromAExp (ArrList [Fst]) = [|fst|]
-fromAExp (ArrList [Snd]) = [|snd|]
-fromAExp (ArrList [Swap]) = [|swap|]
-fromAExp (ArrList (f:rest)) = [| arr ( $(fromAExp $ ArrList rest) . $(fromAExp $ ArrList [f]) ) |]
-
 fromAExp (Arr f) = appE [|arr|] f
+
+-- Should not be arround after second rewrite pass:
+--fromAExp (ArrFirst f) = appE [|arr|] f
+--fromAExp (ArrSecond f) = appE [|arr|] f
 fromAExp (First f) = appE [|first|] (fromAExp f)
 fromAExp (f :>>> g) = infixE (Just (fromAExp f)) [|(>>>)|] (Just (fromAExp g))
 fromAExp (Loop f) = appE [|loop|] (fromAExp f)
@@ -291,8 +290,8 @@ fromAExp (f :*** g) = infixE (Just (fromAExp f)) [|(***)|] (Just (fromAExp g)) -
 -- Arrow and CCA laws:
 normalize :: AExp -> AExp
 normalize (Arr f :>>> Arr g) = Arr (g `o` f)
-normalize (First (Arr f)) = Arr (f `crossE` idE)
-normalize (Second (Arr f)) = error "second found" --Arr (idE `crossE` f)
+normalize (First (Arr f)) = ArrFirst (f `crossE` idE)
+normalize (Second (Arr f)) = ArrSecond (idE `crossE` f)
 normalize (Arr f :>>> LoopD i g) = LoopD i (g `o` (f `crossE` idE))
 normalize (LoopD i f :>>> Arr g) = LoopD i ((g `crossE` idE) `o` f)
 normalize (LoopD i f :>>> LoopD j g) = LoopD (tupE [i,j])
@@ -300,14 +299,15 @@ normalize (LoopD i f :>>> LoopD j g) = LoopD (tupE [i,j])
 normalize (Loop (LoopD i f)) = LoopD i (traceE (juggleE `o` f `o` juggleE))
 normalize (First (LoopD i f)) = LoopD i (juggleE `o` (f `crossE` idE) `o` juggleE)
 normalize (Init i) = LoopD i swapE
-normalize (Arr f :>>> ArrM g) = ArrM [| $g . $f |]
 -- Choice:
 normalize (Lft (Arr f)) = Arr (lftE f)
 normalize (Lft (LoopD i f)) = LoopD i (untagE `o` lftE f `o` tagE)
 
+normalize (Arr f :>>> ArrM g) = ArrM [| $g . $f |]
 normalize (ArrM f :>>> Arr g) = ArrM [| liftM $g . $f |]
 normalize (Loop (Arr f)) = Arr (traceE f) -- Not in original CCA. 2015-TB Added by TOM
 normalize (First (ArrM f)) = ArrM ( f `crossME` [|return|] ) -- Added by TOM
+normalize (Second (ArrM f)) = ArrM ( [|return|] `crossME` f ) -- Added by TOM
 
 normalize (f :>>> Id) = f --Added by TOM
 normalize (Id :>>> f) = f --Added by TOM
@@ -318,33 +318,46 @@ normalize (Lft Id) = Id
 
 normalize (Diag :>>> Fst) = Id
 normalize (Diag :>>> Snd) = Id
-normalize ( Diag :>>> (f :*** g) :>>> Snd) = g
-normalize ( Diag :>>> (f :*** g) :>>> Fst) = f
+normalize (Diag :>>> (f :*** g) :>>> Snd) = g
+normalize (Diag :>>> (f :*** g) :>>> Fst) = f
+normalize (Diag :>>> Arr f) = Arr ( f `o` dupE)
+normalize (Diag :>>> ArrM f) = ArrM ( [| dupE . $f |])
 
-normalize ( Second Disassociate :>>> Disassociate :>>> First Disassociate ) = Disassociate :>>> Disassociate
+-- | Associative. Probably not handy.
+{-normalize ( Second Disassociate :>>> Disassociate :>>> First Disassociate ) = Disassociate :>>> Disassociate
 normalize ( First Associate :>>> Associate :>>> Second Associate ) = Associate :>>> Associate
-
 normalize ( First Swap :>>> Associate :>>> Second Swap) = Associate :>>> Swap :>>> Associate
 normalize ( Second Swap :>>> Associate :>>> First Swap) = Associate :>>> Swap :>>> Associate
+---}
 
 normalize (Swap :>>> Swap) = Id
 normalize (Diag :>>> Swap) = Diag
 
-normalize (Diag :>>> First f :>>> Swap) = Diag :>>> Second f
-normalize (Diag :>>> (First f :>>> Swap)) = Diag :>>> Second f
-normalize (Diag :>>> Second f :>>> Swap) = Diag :>>> First f
-normalize (Diag :>>> (Second f :>>> Swap)) = Diag :>>> First f
---normalize ((f :>>> g) :>>> h) = normE (f :>>> (g :>>> h)) -- Added by TOM
+normalize (Diag :>>> ArrFirst f :>>> Swap) = Diag :>>> ArrSecond f
+normalize (Diag :>>> (ArrFirst f :>>> Swap)) = Diag :>>> ArrSecond f
+normalize (Diag :>>> ArrSecond f :>>> Swap) = Diag :>>> ArrFirst f
+normalize (Diag :>>> (ArrSecond f :>>> Swap)) = Diag :>>> ArrFirst f
 normalize (f :>>> (g :>>> h)) = (f :>>> g) :>>> h -- Added by TOM
---normalize (Second f) = Swap :>>> First f :>>> Swap
--- All the other cases are unchanged.
-normalize (Diag :>>> Arr f) = ArrList [Diag,Arr f]
-normalize (
+
+-- | We presume that pure actions are fairly cheap to perform, thus not much to gain by ***
+normalize (Arr f :*** Arr g) = Arr $ f `crossE` g
+normalize (ArrM f :*** Arr g) = ArrM $ f `crossME` [| return . $g |]
+normalize (Arr f :*** ArrM g) = ArrM $ [| return . $f |]  `crossME` g
 normalize e = e
 
-normalize2 (Diag :>>> Arr f) = Arr (f `o` dupE)
-normalize2 (Arr f :>>> Diag) = Arr (dupE `o` f)
-normalize2 (Arr f :>>> Swap) = Arr (swapE `o` f)
+-- | Round 2 to remove residual Arr's from first/second usage
+normalizeA :: AExp -> AExp
+normalizeA ((f :>>> g) :>>> h) = f :>>> (g :>>> h) -- Added by TOM
+normalizeA (f :>>> (g :>>> h)) = f :>>> (g :>>> h) -- Added by TOM
+normalizeA (ArrFirst f) = Arr f
+normalizeA (ArrSecond f) = Arr f
+normalizeA Id = Arr idE
+normalizeA Diag = Arr dupE
+normalizeA Swap = Arr swapE
+normalizeA Fst = Arr [|fst|]
+normalizeA Snd = Arr [|snd|]
+normalizeA f = normalize f
+
 -- | Used to take the function produced by normOpt and process a stream.
 -- TODO: explain various arguments, state etc.
 runCCNF :: e -> ((b, e) -> (c, e)) -> [b] -> [c]

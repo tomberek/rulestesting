@@ -17,14 +17,16 @@ import           Data.List
 import           Language.Haskell.Exts.Syntax
 import qualified Language.Haskell.TH as TH
 import           Language.Haskell.TH.Alpha
-import           Control.Monad
 
+
+tuplize :: [Pat] -> Pat
+tuplize [] = PTuple Boxed []
 tuplize [s] =s
 tuplize (s:ss) = PTuple Boxed [s, tuplize ss]
 
 -- | Like @if@, but where the test can be monadic.
 ifM :: Monad m => m Bool -> m a -> m a -> m a
-ifM b t f = do b <- b; if b then t else f
+ifM b t f = do b' <- b; if b' then t else f
 
 promote :: TH.Pat -> TH.Exp
 promote (TH.ConP _ [pat]) = promote pat
