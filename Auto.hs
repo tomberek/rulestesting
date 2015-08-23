@@ -32,7 +32,7 @@ runAutoIO = runAutoX . runAutoXIO
 runAutoIO_ :: AutoXIO a b -> a -> IO (Maybe b)
 runAutoIO_ f a = (runAutoX . runAutoXIO) f a >>= return . fst
 
-instance Arrow (AutoXIO) where
+instance Arrow AutoXIO where
     arr :: (b -> c) -> AutoXIO b c
     arr f     = AutoXIO $ AConsX $ \b -> return (Just $ f b,arr f)
     first (AutoXIO a)   = AutoXIO $ first a

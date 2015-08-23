@@ -5,13 +5,20 @@ module Main where
 import           Prelude                     hiding (id, (.))
 import           Control.Arrow.CCA.Optimize
 import           Examples
-import Auto
+import           Auto
+
 main :: IO ()
 main = do
+    print "original:"
+    printCCA example4b
+    print "optimized:"
     printCCA ( $(normQ example4b))
-    --print $ snd $(normOpt example4b) (5::Int)
-    printCCA ($(normQ example2) )
+    print ""
+    print "original:"
+    printCCA line2
+    print "optimized:"
     printCCA ($(normQ line2))
+    print "Autos running in parallel"
     runAutoIO_ line2 ("http://www.google.com","http://www.cnn.com") >>= print . show
     --(runKleisli . runPKleisli) banana ("http://www.google.com","http://www.cnn.com") >>= print . show
     --(runKleisli . runPKleisli) example2 ("http://www.google.com","http://www.cnn.com") >>= print . show
