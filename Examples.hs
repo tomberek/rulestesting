@@ -3,8 +3,6 @@
 module Examples where
 import           Control.Arrow.Init.Optimize
 import           Control.Arrow.TH
-
-
 import           Control.Arrow
 
 {-
@@ -72,11 +70,8 @@ example4 = [arrow|
 example4b :: ArrowInit a => a Int Int
 example4b = [arrow|
      proc n -> do
-        a <- arr (+1) -< n
-        () <- returnA -< n
-        _ <- arr (*2) -< n + 3
-        d <- arr (*2) -< a + 1
-        returnA -< a + n
+        d <- arr (uncurry (+)) -< (n,n)
+        arr (uncurry (-)) -< (n,d)
             |]
 example2 :: ArrowInit a => a Int Int
 example2 = [arrow|
