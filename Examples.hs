@@ -4,8 +4,6 @@ module Examples where
 import           Control.Arrow.Init.Optimize
 import           Control.Arrow.TH
 import           Control.Arrow
-
-{-
 import           Control.Concurrent          (threadDelay)
 import           Data.Time
 import           Network.HTTP
@@ -35,9 +33,9 @@ getURLSum = [arrow| (arrM processURL) >>> (arr length) |]
 line2 :: (M a ~ IO, ArrowInit a) => a (String,String) Int
 line2 = [arrow|
     proc (x,y) -> do
-    a <- getURLSum -< x
-    b <- getURLSum -< y
-    returnA -< a+b
+        a <- getURLSum -< x
+        b <- getURLSum -< y
+        returnA -< a+b
     |]
 line3 :: (M a ~ IO, ArrowInit a) => a (String,String) Int
 line3 = [arrow|
@@ -46,6 +44,8 @@ line3 = [arrow|
     returnA -< c+d
     |]
 
+
+{- no implemented yet
 example1 :: ArrowInit a => a Int Int
 example1 = [arrow|
     proc n -> do
@@ -54,9 +54,8 @@ example1 = [arrow|
             e <- arr (+1) -< a + (1::Int)
         returnA -< a
     |]
+-}
 
-
----}
 
 example4 :: ArrowInit a => a Int Int
 example4 = [arrow|

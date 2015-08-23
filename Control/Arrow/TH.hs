@@ -48,14 +48,7 @@ makeLenses ''NodeE
 arrow :: QuasiQuoter
 arrow = QuasiQuoter {
     quoteExp = \input -> case E.parseExpWithMode E.defaultParseMode{E.extensions=[E.EnableExtension E.Arrows],E.fixities=Just (E.baseFixities)} input of
-        E.ParseOk result -> Debug.Trace.trace (unlines $
-                [show $ topSort graph
-                ,show graph
-                ,show $ dfs graph (topSort graph)
-                ,drawForest $ (fmap (fmap show) $ dfs graph (topSort graph))
-                ,drawForest $ (fmap (fmap show) $ dfs (transposeG graph) (topSort $ transposeG graph))
-                ])
-                buildExp nodes graph [0] [] >>= arrFixer
+        E.ParseOk result -> buildExp nodes graph [0] [] >>= arrFixer
                 where (graph,nodes) = process [] result
         E.ParseFailed l err -> error $ show l ++ show err
       , quotePat = error "cannot be patterns."
@@ -76,15 +69,16 @@ instance Show Expression where
   show (Expression v p _) = "Expression: " ++ show v ++ show p
 
 buildExp :: IntMap NodeE -> Graph -> [Vertex] -> [Expression] -> ExpQ
+buildExp (toList -> [(0,ProcN (-1) E.PWildCard expr)]) _ [0] [] = expr
 buildExp _ _ [] [Expression _ _ e] = e
 buildExp _ _ [g] [Expression v _ e] | g==v = e
 buildExp (fst . findMax -> target) _ _ exps | elem target (map getEV exps) = getEE . fromJust $ Data.List.find ( (==) target . getEV) exps -- got target early, effects?
-buildExp _ _ [] _ = error "multiple expressions, no goals"
+buildExp intmap@(fst . findMax -> target) graph [] exps = buildExp intmap graph [target] exps
 buildExp intmap graph goals exps = buildExp intmap graph newGoals newExps
     where
         flag ind = all (flip elem (map getEV exps)) $ (transposeG graph) ^. ix ind -- tells if a vertex is obtainable
         flags = findIndices flag goals -- lists obtainable goal indeces
-        (newGoals,newExps) = Debug.Trace.trace ("flagged goals: " ++ show flags ++ "out of " ++ show goals ++ " and exps " ++ show exps) 
+        (newGoals,newExps) = Debug.Trace.trace ("flagged goals: " ++ show flags ++ "out of " ++ show goals ++ " and exps " ++ show exps)
                                 $ step (goals,exps) (map ( (Data.List.!!) goals) flags)
         step (goals',exps') [] = (goals',exps')
         step (goals',exps') (flagged:rest) = Debug.Trace.trace (show (goals',exps')) step helper rest
@@ -102,7 +96,7 @@ buildExp intmap graph goals exps = buildExp intmap graph newGoals newExps
                 currentArrow = intmap ^?! ix flagged . arrowE
 
 createConnection :: [Expression] -> E.Exp -> ArrowExp -> ExpQ
-createConnection []   _ arrowExp = [| $arrowExp |] -- should only be the original req. This doesn't visit literal signaled arrows. No SIDE EFFECTS?
+createConnection [] expr arrowExp = [| arr (\a -> $(returnQ $ toExp expr)) >>> $arrowExp |] -- should only be the original req. This doesn't visit literal signaled arrows. No SIDE EFFECTS?
 createConnection exps thisExp arrowExp = defaultConnection exps thisExp arrowExp
 
 defaultConnection :: [Expression] -> E.Exp -> ArrowExp -> ExpQ
@@ -115,14 +109,15 @@ expr1 &:& expr2 = uInfixE expr1 (varE $ mkName "&&&") expr2
 
 process :: [NodeE] -> E.Exp -> (Graph,IntMap NodeE)
 process ps (E.Proc _ b c) = process (ProcN 0 b [|Q.id|] : ps) c
-process ps (E.Do statements) = (buildGr $ allNodes,fromAscList $ zip (view i <$> allNodes) allNodes)
+process ps (E.Do statements) = (buildGr allNodes , fromAscList $ zip (view i <$> allNodes) allNodes)
     where
         allNodes = ps ++ (snd $ mapAccumL makeNodes 1 statements)
         makeNodes ind (E.Generator _ p (E.LeftArrApp (returnQ . toExp -> e1) e2)) = (ind+1,StmtN ind p e2 e1)
         makeNodes ind (E.Qualifier (E.LeftArrApp (returnQ . toExp -> e1) e2)) = (ind+1,CmdN ind E.PWildCard e2 e1)
         --makeNodes ind (E.LetStmt (E.BDecls (E.PatBind _ p _ (E.UnGuardedRhs rhs) binds :[]))) = (ind+1,StmtN ind p rhs [| Q.id |])
         makeNodes _ _ = error "process can only process Generators and Qualifier in Do statements"
-process _ _ = error "does not process rec yet"
+process [] expr = (buildG (0,0) [] , singleton 0 $ ProcN (-1) E.PWildCard (returnQ $ toExp expr))
+process _ expr = error $ "does not process rec yet" ++ show expr
 
 buildGr :: [NodeE] -> Graph
 buildGr n = buildG (0,length n -1) $ makeEdges n
