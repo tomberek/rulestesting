@@ -37,10 +37,15 @@ import Control.Applicative
 
 type ArrowExp = ExpQ
 data NodeE =
-    ProcN {_i::Int,_pat::E.Pat,_arrowE::ArrowExp}
+    ProcN {_i::Int,_pat::E.Pat,_expr::E.Exp,_arrowE::ArrowExp}
     | StmtN {_i::Int,_pat::E.Pat,_expr::E.Exp,_arrowE::ArrowExp}
     | CmdN  {_i::Int,_pat::E.Pat,_expr::E.Exp,_arrowE::ArrowExp}
     | LetN {_i::Int,_pat::E.Pat,_expr::E.Exp,_arrowE::ArrowExp}
+instance Show NodeE where
+    show (ProcN i p e _) = "ProcN:" ++ show i ++ show p ++ show e
+    show (StmtN i p e _) = "StmtN" ++ show i ++ show p ++ show e
+    show (CmdN i p e _) = "CmdN" ++ show i ++ show p ++ show e
+    show (LetN i p e _) = show i ++ show p ++ show e
 makeLenses ''NodeE
 
 -- | A 'QuasiQuoter' that desugars proc-do notation and prepares for
@@ -69,12 +74,12 @@ instance Show Expression where
   show (Expression v p _) = "Expression: " ++ show v ++ show p
 
 buildExp :: IntMap NodeE -> Graph -> [Vertex] -> [Expression] -> ExpQ
-buildExp (toList -> [(0,ProcN (-1) E.PWildCard expr)]) _ [0] [] = expr
+buildExp (toList -> [(0,ProcN (-1) E.PWildCard _ expr)]) _ [0] [] = expr
 buildExp _ _ [] [Expression _ _ e] = e
 buildExp _ _ [g] [Expression v _ e] | g==v = e
 buildExp (fst . findMax -> target) _ _ exps | elem target (map getEV exps) = getEE . fromJust $ Data.List.find ( (==) target . getEV) exps -- got target early, effects?
 buildExp intmap@(fst . findMax -> target) graph [] exps = buildExp intmap graph [target] exps
-buildExp intmap graph goals exps = buildExp intmap graph newGoals newExps
+buildExp intmap graph goals exps = Debug.Trace.trace ("called " ++ show goals) $ buildExp intmap graph newGoals newExps
     where
         flag ind = all (flip elem (map getEV exps)) $ (transposeG graph) ^. ix ind -- tells if a vertex is obtainable
         flags = findIndices flag goals -- lists obtainable goal indeces
@@ -89,15 +94,18 @@ buildExp intmap graph goals exps = buildExp intmap graph newGoals newExps
                 reqExps = map ((Data.List.!!) exps') helper2
                 remainingExps = (Data.List.\\) exps' reqExps
                 newExps2 =replicate (max 1 $ length newGoals2) $
-                                Expression flagged thisPat $ createConnection reqExps thisExp currentArrow --createExp reqExps
-                thisNode = intmap ! flagged
-                thisPat = thisNode ^. pat
-                thisExp = thisNode ^?! expr
-                currentArrow = intmap ^?! ix flagged . arrowE
+                                Expression flagged thisPat $ createConnection flagged reqExps thisExp currentArrow --createExp reqExps
+                thisNode = Debug.Trace.trace (show flagged ++ show intmap) $ intmap ^?! ix flagged
+                thisPat = Debug.Trace.trace (show "pats :" ++ show flagged) $ thisNode ^. pat
+                thisExp = Debug.Trace.trace (show flagged ++ "exp :" ++ show (reqExps)++ show thisPat)
+                         $ thisNode ^?! expr
+                currentArrow = Debug.Trace.trace (show "arr :" ++ show (flagged)) $ 
+                            intmap ^?! ix flagged . arrowE
 
-createConnection :: [Expression] -> E.Exp -> ArrowExp -> ExpQ
-createConnection [] expr arrowExp = [| arr (\a -> $(returnQ $ toExp expr)) >>> $arrowExp |] -- should only be the original req. This doesn't visit literal signaled arrows. No SIDE EFFECTS?
-createConnection exps thisExp arrowExp = defaultConnection exps thisExp arrowExp
+createConnection :: Int -> [Expression] -> E.Exp -> ArrowExp -> ExpQ
+createConnection 0 [] expr arrowExp = [| $arrowExp |] -- should only be the original req. This doesn't visit literal signaled arrows. No SIDE EFFECTS?
+createConnection _ [] expr arrowExp = [| arr (\a -> $(returnQ $ toExp expr)) >>> $arrowExp |] -- should only be the original req. This doesn't visit literal signaled arrows. No SIDE EFFECTS?
+createConnection _ exps thisExp arrowExp = defaultConnection exps thisExp arrowExp
 
 defaultConnection :: [Expression] -> E.Exp -> ArrowExp -> ExpQ
 defaultConnection exps thisExp arrowExp = [| $(foldl1 (&:&) (getEE <$> exps))
@@ -108,7 +116,7 @@ defaultConnection exps thisExp arrowExp = [| $(foldl1 (&:&) (getEE <$> exps))
 expr1 &:& expr2 = uInfixE expr1 (varE $ mkName "&&&") expr2
 
 process :: [NodeE] -> E.Exp -> (Graph,IntMap NodeE)
-process ps (E.Proc _ b c) = process (ProcN 0 b [|Q.id|] : ps) c
+process ps (E.Proc _ b c) = process (ProcN 0 b (E.List []) [|Q.id|] : ps) c
 process ps (E.Do statements) = (buildGr allNodes , fromAscList $ zip (view i <$> allNodes) allNodes)
     where
         allNodes = ps ++ (snd $ mapAccumL makeNodes 1 statements)
@@ -116,7 +124,7 @@ process ps (E.Do statements) = (buildGr allNodes , fromAscList $ zip (view i <$>
         makeNodes ind (E.Qualifier (E.LeftArrApp (returnQ . toExp -> e1) e2)) = (ind+1,CmdN ind E.PWildCard e2 e1)
         --makeNodes ind (E.LetStmt (E.BDecls (E.PatBind _ p _ (E.UnGuardedRhs rhs) binds :[]))) = (ind+1,StmtN ind p rhs [| Q.id |])
         makeNodes _ _ = error "process can only process Generators and Qualifier in Do statements"
-process [] expr = (buildG (0,0) [] , singleton 0 $ ProcN (-1) E.PWildCard (returnQ $ toExp expr))
+process [] expr = (buildG (0,0) [] , singleton 0 $ ProcN (-1) E.PWildCard (E.List []) (returnQ $ toExp expr))
 process _ expr = error $ "does not process rec yet" ++ show expr
 
 buildGr :: [NodeE] -> Graph
@@ -131,7 +139,7 @@ makeEdge names ind node = if Set.null f then Nothing else Just (ind,view i node)
     where f = names `Set.intersection` (Set.fromList $ freeVars node)
 
 instance FreeVars NodeE where
-    freeVars (ProcN _ _ _) = []
+    freeVars (ProcN _ _ _ _) = []
     freeVars ex = freeVars $ ex ^?! expr --ProcN has no freeVars in non-existant expression
 instance FreeVars P where
     freeVars (P ex) = freeVars $ ex ^. pat
