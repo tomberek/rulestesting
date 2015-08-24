@@ -5,6 +5,7 @@ import           Control.Arrow.CCA.Optimize
 import           Control.Arrow.TH
 import           Control.Arrow
 import           Control.Concurrent          (threadDelay)
+import Control.Concurrent.Async
 import           Data.Time
 import           Network.HTTP
 {-
@@ -21,17 +22,17 @@ line1 = [arrow| proc (n,g) -> do
     returnA -< ()
     |]
 ---}
-processURL :: String -> IO String
-processURL a = do
+processURL :: String -> Concurrently String
+processURL a = Concurrently $ do
     getCurrentTime >>= print
     threadDelay 1000000
     response <- simpleHTTP (getRequest a)
     getResponseBody response
 
-getURLSum :: (M a ~ IO,ArrowCCA a) => a String Int
+getURLSum :: (M a ~ Concurrently,ArrowCCA a) => a String Int
 getURLSum = [arrow| (arrM processURL) >>> (arr length) |]
 
-line2 :: (M a ~ IO, ArrowCCA a) => a (String,String) Int
+line2 :: (M a ~ Concurrently, ArrowCCA a) => a (String,String) Int
 line2 = [arrow|
     proc (x,y) -> do
         a <- getURLSum -< y
