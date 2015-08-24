@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE GADTs                 #-}
@@ -17,7 +18,7 @@ Portability :  GADTs,TemplateHaskell,MultiParamTypesClasses
 Originally from CCA package: <https://hackage.haskell.org/package/CCA-0.1.5.2>
 -}
 module Control.Arrow.CCA.Optimize
-    (norm, normOpt, fromAExp, normalize,
+    (norm, normOpt, fromAExp, normalize,normalizeTrace,
     runCCNF, nth', runIt,
     pprNorm, pprNormOpt, printCCA, ASyn(..),AExp(..),ArrowCCA(..),(.),id
     --cross, dup, swap, assoc, unassoc, juggle, trace, mirror, untag, tagT, untagT,
@@ -34,6 +35,8 @@ import           Control.Applicative
 import           Data.Char           (isAlpha)
 import           Language.Haskell.TH
 import           Language.Haskell.TH.Utilities
+import           Data.Bitraversable
+import           Control.Parallel
 import qualified Control.Lens as L
 import Control.Lens
 import qualified Debug.Trace
@@ -336,7 +339,6 @@ normalize ((f :&&& g) :>>> Swap) = g :&&& f
 normalize (Id :&&& g) = Diag :>>> Second g
 normalize (f :&&& Id) = Diag :>>> First f
 
-
 -- | Associative. Probably not handy yet
 {-normalize ( Second Disassociate :>>> Disassociate :>>> First Disassociate ) = Disassociate :>>> Disassociate
 normalize ( First Associate :>>> Associate :>>> Second Associate ) = Associate :>>> Associate
@@ -371,6 +373,7 @@ normalizeA :: AExp -> AExp
 normalizeA (Arr f :*** Arr g) = Arr $ f `crossE` g
 normalizeA (ArrM f :*** Arr g) = ArrM $ f `crossME` [| return . $g |]
 normalizeA (Arr f :*** ArrM g) = ArrM $ [| return . $f |]  `crossME` g
+normalizeA (ArrM f :*** ArrM g) = ArrM $ f `crossME` g
 
 normalizeA (Arr f :&&& Arr g) = Arr $ (f `crossE` g) `o` dupE
 normalizeA (ArrM f :&&& Arr g) = ArrM $ (f `crossME` [| return . $g |]) `o` dupE
@@ -388,6 +391,8 @@ normalizeA f = normalize f
 
 -- | Used to take the function produced by normOpt and process a stream.
 -- TODO: explain various arguments, state etc.
+-- `e` is the initial state, [b] is input stream
+-- The function will only match if it is in LoopD form.
 runCCNF :: e -> ((b, e) -> (c, e)) -> [b] -> [c]
 runCCNF i f = g i
         where
@@ -419,20 +424,22 @@ assoc :: ((t, t1), t2) -> (t, (t1, t2))
 assoc ((x, y), z) = (x, (y, z))
 juggle :: ((t1, t), t2) -> ((t1, t2), t)
 juggle ((x, y), z) = ((x, z), y)
+
 trace :: ((t1, t2) -> (t, t2)) -> t1 -> t -- pure looping
 trace f x = let (y, z) = f (x, z) in y
+-- need a traceM?
 
 cross :: (t -> t2) -> (t1 -> t3) -> (t, t1) -> (t2, t3)
-cross f g (x, y) = (f x, g y)
+cross = bimap
 
---bimap :: r a b -> s c d -> t (p a c) (p b d)
---Bifunctor (,) (->) (->) (->)
--- is this bimap?
-crossM :: Monad m => (t -> m t2) -> (t1 -> m t3) -> (t, t1) -> m (t2,t3)
-crossM f g (x, y) = do
-    a <- f x
-    b <- g y
-    return (a,b)
+-- | Uses whatever Applicative instance for ArrM *** ArrM combining.
+-- Look into Control.Concurrent.Async or
+-- newtype Pair a = Pair a deriving (Functor)
+-- instance Applicative Pair where
+--      pure a = Pair a
+--      Pair fs <*> Pair as = Pair $ (\(f,a) -> f a) $ fs `par` (as `pseq` (fs,as))
+crossM :: Applicative m => (t -> m t2) -> (t1 -> m t3) -> (t, t1) -> m (t2,t3)
+crossM f g =uncurry (liftA2 (,)) . bimap f g
 
 mirror :: Either b a -> Either a b
 mirror (Left x) = Right x

@@ -19,7 +19,7 @@ main = do
     print "CCA optimized:"
     printCCA ($(norm line2))
     print "Autos running in parallel"
-    runAutoIO_ line2 ("http://www.google.com","http://www.cnn.com") >>= print . show
+    runAutoIO_ $(norm line2) ("http://www.google.com","http://www.cnn.com") >>= print . show
     --(runKleisli . runPKleisli) banana ("http://www.google.com","http://www.cnn.com") >>= print . show
     --(runKleisli . runPKleisli) example2 ("http://www.google.com","http://www.cnn.com") >>= print . show
     print "hi"

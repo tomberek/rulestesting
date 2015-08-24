@@ -1,3 +1,6 @@
+{-# LANGUAGE Arrows #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE InstanceSigs               #-}
 {-# LANGUAGE RankNTypes                 #-}
@@ -40,7 +43,7 @@ instance Arrow AutoXIO where
         ( (y1,a1') , (y2,a2') ) <- concurrently (runAutoIO a1 x) (runAutoIO a2 x)
         return (liftA2 (,) y1 y2, a1' &&& a2')
 
-instance ArrowCCA (AutoXIO) where
+instance ArrowCCA AutoXIO where
     delay b = AutoXIO $ delay b
     type M AutoXIO = IO
     arrM f = AutoXIO $ arrM f
@@ -67,6 +70,32 @@ testAutoM a (x:xs)  = do
 testAutoM_ :: Monad m => AutoX m a b -> [a] -> m [Maybe b]
 testAutoM_ a as = liftM fst $ testAutoM a as
 
+newtype AAuto m a b = A {runA :: m a (Maybe b,AAuto m a b)}
+instance ArrowChoice m => Category (AAuto m) where
+    id = A $ arr (\a->(Just a,id))
+    g . f= A $ proc x -> do
+              (y, f') <- runA f -< x
+              (z, g') <- case y of
+                           Just _y -> runA g -< _y
+                           Nothing -> returnA -< (Nothing, g)
+              returnA -< (z, g' . f')
+instance Arrow m => Functor (AAuto m r) where
+    fmap f a = A $ proc x -> do
+                  (y, a') <- runA a -< x
+                  returnA -< (fmap f y, fmap f a')
+instance Arrow m => Applicative (AAuto m r) where
+    pure y    = A $ proc _ -> returnA -< (Just y, pure y)
+    af <*> ay = A $ proc x -> do
+                  (f, af') <- runA af -< x
+                  (y, ay') <- runA ay -< x
+                  returnA -< (f <*> y, af' <*> ay')
+
+
+instance ArrowChoice m => Arrow (AAuto m) where
+    arr f     = A $ proc x -> returnA -< (Just (f x), arr f)
+    first a   = A $ proc (x, z) -> do
+                  (y, a') <- runA a -< x
+                  returnA -< (fmap (,z) y , first a')
 -- Instances
 instance Monad m => Category (AutoX m) where
     id    = AConsX $ \x -> return (Just x, id)
@@ -88,6 +117,7 @@ instance Monad m => Applicative (AutoX m r) where
                   (f, af') <- runAutoX af x
                   (y, ay') <- runAutoX ay x
                   return  (f <*> y, af' <*> ay')
+
 
 instance MonadFix m => Arrow (AutoX m) where
     arr f     = AConsX $ \x -> return (Just (f x), arr f)

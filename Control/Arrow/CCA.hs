@@ -1,3 +1,4 @@
+{-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
@@ -24,10 +25,13 @@ import           Control.Concurrent.Async
 import           Control.Monad.Identity
 import           Language.Haskell.TH
 
--- | An @'Arrowdelay'@ is a typeclass that captures causual commutative arrows.
+-- | An @'ArrowCCA'@ is a typeclass that captures causual commutative arrows.
 -- Any instance must also be an instance of 'ArrowLoop'.
 -- Merged at the moment with an @'ArrowEffect'@ typeclass that captures monadic
 -- causual commutative arrows.
+-- Laws:
+-- `first f >>> second g == second g >>> first f`
+-- `init i *** init j == init (i,j)`
 class ArrowLoop a => ArrowCCA a where
     arr' :: ExpQ -> (b->c) -> a b c
     arr' _ = arr
@@ -39,7 +43,8 @@ class ArrowLoop a => ArrowCCA a where
     type M a :: * -> *
     type M a = Identity
     arrM :: (b -> (M a) c) -> a b c
-    --arrM f = arr $ \a -> runIdentity $ f a
+    default arrM :: (b -> Identity c) -> a b c
+    arrM f = arr $ \a -> runIdentity $ f a
     arrM' :: ExpQ -> (b -> (M a) c) -> a b c
     arrM' _ = arrM
 
@@ -57,3 +62,8 @@ instance ArrowCCA (PKleisli) where
     delay = error "delay for PKleisli not defined"
     type M PKleisli = IO
     arrM f = PKleisli $ Kleisli f
+
+instance MonadFix m => ArrowCCA (Kleisli m) where
+    delay = error "delay for PKleisli not defined"
+    type M (Kleisli m) = m
+    arrM f = Kleisli f
