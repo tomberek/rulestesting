@@ -8,6 +8,7 @@ import           Control.Concurrent          (threadDelay)
 import Control.Concurrent.Async
 import           Data.Time
 import           Network.HTTP
+import Prelude hiding (id,(.))
 {-
 line1 :: (M a ~ IO,ArrowCCA a) => a (String, String) ()
 line1 = [arrow| proc (n,g) -> do
@@ -29,8 +30,10 @@ processURL a = Concurrently $ do
     response <- simpleHTTP (getRequest a)
     getResponseBody response
 
-getURLSum :: (M a ~ Concurrently,ArrowCCA a) => a String Int
-getURLSum = [arrow| (arrM processURL) >>> (arr length) |]
+--getURLSum :: (M a ~ Concurrently,ArrowCCA a) => a String Int
+
+g = Kleisli $ \a -> return $ length a
+getURLSum = [arrow| (arr $ Kleisli processURL) >>> (arr $ Kleisli $ return . length) |]
 
 line2 :: (M a ~ Concurrently, ArrowCCA a) => a (String,String) Int
 line2 = [arrow|
