@@ -1,10 +1,7 @@
-{-# LANGUAGE Arrows                     #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE InstanceSigs               #-}
-{-# LANGUAGE QuasiQuotes                #-}
 {-# LANGUAGE RankNTypes                 #-}
 {-# LANGUAGE RecursiveDo                #-}
-{-# LANGUAGE TemplateHaskell            #-}
 {-# LANGUAGE TupleSections              #-}
 {-# LANGUAGE TypeFamilies               #-}
 -- http://blog.jle.im/entry/effectful-recursive-real-world-autos-intro-to-machine
@@ -17,7 +14,6 @@ import           Control.Applicative
 import           Control.Arrow
 import           Control.Arrow.CCA
 import           Control.Arrow.CCA.Optimize
-import           Control.Arrow.TH
 import           Control.Category
 import           Control.Concurrent.Async
 import           Control.Monad
@@ -30,7 +26,7 @@ autoIO = AutoXIO . AConsX
 runAutoIO :: AutoXIO a b -> a -> IO (Maybe b, AutoX IO a b)
 runAutoIO = runAutoX . runAutoXIO
 runAutoIO_ :: AutoXIO a b -> a -> IO (Maybe b)
-runAutoIO_ f a = (runAutoX . runAutoXIO) f a >>= return . fst
+runAutoIO_ f a = liftM fst $ (runAutoX . runAutoXIO) f a
 
 instance Arrow AutoXIO where
     arr :: (b -> c) -> AutoXIO b c

@@ -9,15 +9,15 @@ import           Auto
 
 main :: IO ()
 main = do
-    print "original:"
+    print "Just proc-do desugar:"
     printCCA example4b
-    print "optimized:"
-    printCCA ( $(normQ example4b))
+    print "CCA optimized:"
+    printCCA ( $(norm example4b))
     print ""
-    print "original:"
+    print "Just proc-do desugar:"
     printCCA line2
-    print "optimized:"
-    printCCA ($(normQ line2))
+    print "CCA optimized:"
+    printCCA ($(norm line2))
     print "Autos running in parallel"
     runAutoIO_ line2 ("http://www.google.com","http://www.cnn.com") >>= print . show
     --(runKleisli . runPKleisli) banana ("http://www.google.com","http://www.cnn.com") >>= print . show
