@@ -259,7 +259,7 @@ normOpt (AExp e) = do
 -- | fromAExp converts AExp back to TH Exp structure.
 fromAExp :: AExp -> ExpQ
 
-fromAExp Id = [|arr id|] -- Categorical constructors should not be around after second stage
+fromAExp Id = [|id|] -- Categorical constructors should not be around after second stage
 fromAExp Diag = [| arr dup |]
 fromAExp Fst = [| arr fst |]
 fromAExp Snd = [| arr snd |]
@@ -373,7 +373,7 @@ normalizeA :: AExp -> AExp
 normalizeA (Arr f :*** Arr g) = Arr $ f `crossE` g
 normalizeA (ArrM f :*** Arr g) = ArrM $ f `crossME` [| return . $g |]
 normalizeA (Arr f :*** ArrM g) = ArrM $ [| return . $f |]  `crossME` g
-normalizeA (ArrM f :*** ArrM g) = ArrM $ f `crossME` g
+--normalizeA (ArrM f :*** ArrM g) = ArrM $ f `crossME` g
 
 normalizeA (Arr f :&&& Arr g) = Arr $ (f `crossE` g) `o` dupE
 normalizeA (ArrM f :&&& Arr g) = ArrM $ (f `crossME` [| return . $g |]) `o` dupE
@@ -383,10 +383,10 @@ normalizeA (ArrSecond f) = Arr (idE `crossE` f)
 normalizeA (f :>>> (g :>>> h)) = (f :>>> g) :>>> h -- Added by TOM
 normalizeA ((f :>>> g) :>>> h) = (f :>>> g) :>>> h -- Added by TOM
 --normalizeA Id = Arr idE
-normalizeA Diag = Arr dupE
-normalizeA Swap = Arr swapE
-normalizeA Fst = Arr [|fst|]
-normalizeA Snd = Arr [|snd|]
+--normalizeA Diag = Arr dupE
+--normalizeA Swap = Arr swapE
+--normalizeA Fst = Arr [|fst|]
+--normalizeA Snd = Arr [|snd|]
 normalizeA f = normalize f
 
 -- | Used to take the function produced by normOpt and process a stream.
@@ -461,7 +461,8 @@ untagT z = case z of
   Right (x, y) -> (Right x, y)
 
 o :: ExpQ -> ExpQ -> ExpQ
-f `o` g = appE (appE [|(.)|] f) g
+f `o` g = infixE (Just g) [|(>>>)|] (Just f) -- appE (appE [|(.)|] f) g
+--fromAExp (f :>>> g) = infixE (Just (fromAExp f)) [|(>>>)|] (Just (fromAExp g))
 crossE :: ExpQ -> ExpQ -> ExpQ
 f `crossE` g = appE (appE [|cross|] f) g
 

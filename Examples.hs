@@ -23,34 +23,34 @@ line1 = [arrow| proc (n,g) -> do
     returnA -< ()
     |]
 ---}
-processURL :: String -> Concurrently String
-processURL a = Concurrently $ do
+
+processURL :: String -> IO String
+processURL a = do
     getCurrentTime >>= print
     threadDelay 1000000
     response <- simpleHTTP (getRequest a)
     getResponseBody response
 
---getURLSum :: (M a ~ Concurrently,ArrowCCA a) => a String Int
+getURLSum :: (M a ~ IO,ArrowCCA a) => a String Int
+getURLSum = [arrow| (arrM processURL) >>> (arr length) |]
 
-g = Kleisli $ \a -> return $ length a
-getURLSum = [arrow| (arr $ Kleisli processURL) >>> (arr $ Kleisli $ return . length) |]
-
-line2 :: (M a ~ Concurrently, ArrowCCA a) => a (String,String) Int
+line2 :: (M a ~ IO, ArrowCCA a) => a (String,String) Int
 line2 = [arrow|
     proc (x,y) -> do
         a <- getURLSum -< y
         b <- getURLSum -< x
         returnA -< a+b
     |]
-{-
-line3 :: (M a ~ IO, ArrowCCA a) => a (String,String) Int
+line3 :: ArrowCCA a => a (b,c) (c,c)
 line3 = [arrow|
-    proc a -> do
-    (c,d) <- getURLSum *** getURLSum -< a
-    returnA -< c+d
+    proc n -> do
+    a <- arr fst -< n
+    b <- arr snd -< n
+    c <- id -< (b,b)
+    d <- id -< (c,a)
+    e <- arr fst . arr fst -< d
+    returnA -< (b,e)
     |]
-<<<<<<< HEAD
----}
 
 {- no implemented yet
 example1 :: ArrowCCA a => a Int Int

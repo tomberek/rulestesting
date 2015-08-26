@@ -30,12 +30,12 @@ instance Monad Concurrently where
   Concurrently a >>= f =
     Concurrently $ a >>= runConcurrently . f
 
-newtype AutoXIO a b = AutoXIO {runAutoXIO :: AutoX Concurrently a b} deriving (Functor,Applicative,Category,Alternative,ArrowChoice,ArrowLoop)
-autoIO :: (a -> Concurrently (Maybe b, AutoX Concurrently a b)) -> AutoXIO a b
+newtype AutoXIO a b = AutoXIO {runAutoXIO :: AutoX IO a b} deriving (Functor,Applicative,Category,Alternative,ArrowChoice,ArrowLoop)
+autoIO :: (a -> IO (Maybe b, AutoX IO a b)) -> AutoXIO a b
 autoIO = AutoXIO . AConsX
-runAutoIO :: AutoXIO a b -> a -> Concurrently (Maybe b, AutoX Concurrently a b)
+runAutoIO :: AutoXIO a b -> a -> IO (Maybe b, AutoX IO a b)
 runAutoIO = runAutoX . runAutoXIO
-runAutoIO_ :: AutoXIO a b -> a -> Concurrently (Maybe b)
+runAutoIO_ :: AutoXIO a b -> a -> IO (Maybe b)
 runAutoIO_ f a = liftM fst $  (runAutoX . runAutoXIO) f a
 
 instance Arrow AutoXIO where
@@ -43,19 +43,19 @@ instance Arrow AutoXIO where
     arr f     = AutoXIO $ AConsX $ \b -> return (Just $ f b,arr f)
     first (AutoXIO a)   = AutoXIO $ first a
     second (AutoXIO a)   = AutoXIO $ second a
-    a1 *** a2 = autoIO $ \(x1, x2) -> Concurrently $ do
-        ( (y1,a1') , (y2,a2') ) <- concurrently (runConcurrently $ runAutoIO a1 x1) (runConcurrently $ runAutoIO a2 x2)
+    a1 *** a2 = autoIO $ \(x1, x2) -> do
+        ( (y1,a1') , (y2,a2') ) <- concurrently (runAutoIO a1 x1) (runAutoIO a2 x2)
         return  (liftA2 (,) y1 y2, a1' *** a2')
-    a1 &&& a2 = autoIO $ \x -> Concurrently $ do
-        ( (y1,a1') , (y2,a2') ) <- concurrently (runConcurrently $ runAutoIO a1 x) (runConcurrently $ runAutoIO a2 x)
+    a1 &&& a2 = autoIO $ \x -> do
+        ( (y1,a1') , (y2,a2') ) <- concurrently (runAutoIO a1 x) (runAutoIO a2 x)
         return (liftA2 (,) y1 y2, a1' &&& a2')
 
 instance ArrowCCA AutoXIO where
     delay b = AutoXIO $ delay b
-    type M AutoXIO = Concurrently
+    type M AutoXIO = IO
     arrM f = AutoXIO $ arrM f
 
-arrIO :: (a -> Concurrently b) -> AutoXIO a b
+arrIO :: (a -> IO b) -> AutoXIO a b
 arrIO action = AutoXIO $ AConsX $ \a -> do
     b <- action a
     return (Just b,runAutoXIO $ arrIO action)

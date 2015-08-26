@@ -19,7 +19,7 @@ import Data.Typeable
 import Control.Monad((>=>))
 import Control.Monad.Fix
 import qualified Debug.Trace as T
-import Control.Arrow.Init
+import Control.Arrow.CCA
 type IOaction a b = a -> IO b
 -- | The free 'Arrow' for a 'Functor' @f@
 data Arr f m a b where
@@ -104,27 +104,3 @@ unassoc (x,(y,z)) = ((x,y),z)
 juggle ((x,y),z) = ((x,z),y)
 juggle' f = juggle . f . juggle
 trace f x = let (y,z) = f (x,z) in y
-evalA exec = go
-    where
-    go freeA = case freeA of
-        Arr f -> return $ arr f
-        ArrM f -> arr f
---f1 :*** f2 -> go f1 *** go f2
---LoopD f1 f2 -> undefined
-        Effect eff -> return $ exec eff
-effect :: eff a b -> Arr eff m a b
-effect = Effect
-instance Category (Arr eff m) where
-    id = Arr id
-    (.) = flip (:>>>)
-instance Arrow (Arr eff m) where
-    arr = Arr
-    first = First
-    second = Second
-    (***) = (:***)
-    (&&&) = Fan
-instance ArrowLoop (Arr eff m) where
-    loop = Loop
-instance ArrowInit (Arr eff m) where
-    init = Init
-    --arr' =
