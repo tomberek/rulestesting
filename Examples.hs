@@ -1,3 +1,7 @@
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE QuasiQuotes     #-}
@@ -6,13 +10,18 @@
 module Examples where
 import           Control.Arrow.CCA.Optimize
 import           Control.Arrow.TH
-import           Control.Arrow
+import           Control.Arrow hiding ((&&&),(***))
 import           Control.Concurrent          (threadDelay)
 import Control.Concurrent.Async
 import           Data.Time
 import           Network.HTTP
-import Prelude hiding (id,(.))
+import Prelude hiding (id,(.),fst,snd)
 import Control.Category
+import Control.Category.Associative
+import Control.Category.Structural
+import Control.Category.Monoidal
+import Control.Category.Cartesian
+import Control.Categorical.Bifunctor
 {-
 line1 :: (M a ~ IO,ArrowCCA a) => a (String, String) ()
 line1 = [arrow| proc (n,g) -> do
@@ -38,7 +47,7 @@ processURL a = do
 getURLSum :: (M a ~ IO,ArrowCCA a) => a String Int
 getURLSum = [arrow| (arrM processURL) >>> (arr length) |]
 
-line2 :: (M a ~ IO, ArrowCCA a) => a (String,String) Int
+line2 :: (M a ~ IO, ArrowCCA a,Weaken (,) a,Symmetric (,) a,Contract (,) a) => a (String,String) Int
 line2 = [arrow|
     proc (x,y) -> do
         a <- getURLSum -< y
@@ -61,37 +70,35 @@ line2 = [arrow|
     () <- cup (u,v)
     () <- cup (w,x)
     -}
-line3 :: ArrowCCA a => a (b,c) (b,c)
-line3 = [arrow|
+
+line3 :: (Symmetric (,) a,HasIdentity () (,) a,Weaken (,) a,Contract (,) a,ArrowCCA a) => a (b,c) (b,c)
+line3 = $(norm [arrow|
     proc (a,b) -> do
-        (c,d) <- arr (\(a,b)->(b,a)) -< (a,b)
-        (e,f) <- arr (const ((),())) -< ()
-        (g,h) <- arr (\(a,b)->(b,a)) -< (c,e)
-        (i,j) <- arr (\(a,b)->(b,a)) -< (d,f)
-        () <- arr (const ()) -< (g,i)
-        (l,m) <- arr (\(a,b)->(b,a)) -< (h,j)
-        returnA -< (l,m)
-        |]
-line3a :: ArrowCCA a => a (c,b) ((),())
-line3a = [arrow|
+        (c,d) <- swap -< (a,b)
+        (e,f) <- id -< ((),())
+        (g,h) <- id -< (c,e)
+        swap -< (g,d)
+        |])
+line3a :: (forall p. HasLeftIdentity ((),()) p a,forall p1. HasLeftIdentity () p1 a,Symmetric (,) a,Weaken (,) a,ArrowCCA a) => a (c,b) ()
+line3a = $(norm [arrow|
     proc (a,b) -> do
-        (c,d) <- arr swap -< (a,b)
-        (e,f) <- arr (const ((),())) -< ()
-        (g,h) <- arr swap -< (c,e)
-        (i,j) <- arr swap -< (f,d)
-        (m,n) <- arr (const ((),())) -< ()
-        (k,l) <- arr (const ((),())) -< ()
-        (q,r) <- arr swap -< (h,k)
-        (s,y) <- arr swap -< (l,i)
-        (o,p) <- arr swap -< (n,g)
-        (t,u) <- arr swap -< (p,q)
-        (v,w) <- arr swap -< (r,s)
-        (x,z) <- arr swap -< (y,j)
-        () <- arr (const ()) -< (o,t)
-        () <- arr (const ()) -< (u,v)
-        () <- arr (const ()) -< (w,x)
-        returnA -< (m,z)
-    |]
+        (c,d) <- swap -< (a,b)
+        (e,f) <- id -< ((),())
+        (g,h) <- swap -< (c,e)
+        (i,j) <- swap -< (f,d)
+        (m,n) <- coidl -< ()
+        (k,l) <- coidl -< ()
+        (q,r) <- swap -< (h,k)
+        (s,y) <- swap -< (l,i)
+        (o,p) <- swap -< (n,g)
+        (t,u) <- swap -< (p,q)
+        (v,w) <- swap -< (r,s)
+        (x,z) <- swap -< (y,j)
+        id -< (o,t)
+        id -< (u,v)
+        id -< (w,x)
+        id -< (m,z)
+    |])
 ---}
 data Bij a b = Bij (a->b) (b->a)
 inverse :: Bij a b -> Bij b a
@@ -125,6 +132,7 @@ type T5 = (T,T4)
 type T6 = (T,T5)
 type T7 = (T,T6)
 type T8 = (T,T7)
+{-
 step1 :: ArrowCCA a => a T1 T3
 step1 = [arrow|
     proc (t1,()) -> do
@@ -132,7 +140,6 @@ step1 = [arrow|
     Right (t1',t3) <- Lift tree -< t2
     returnA -< (t3,t1')
     |]
-{-
 iso :: Bij Tree Tree
 iso = [arrow|
     proc t1 -> do
@@ -210,13 +217,13 @@ example4 = [arrow|
         d <- arr (*2) -< a*1
         returnA -< n
             |]
-example4b :: ArrowCCA a => a Int Int
+example4b :: (Symmetric (,) a,Contract (,) a,ArrowCCA a) => a Int Int
 example4b = [arrow|
      proc n -> do
         d <- arr (uncurry (+)) -< (n,n)
         arr (uncurry (-)) -< (n,d)
             |]
-example2 :: ArrowCCA a => a Int Int
+example2 :: (Symmetric (,) a,Contract (,) a,ArrowCCA a) => a Int Int
 example2 = [arrow|
     proc n -> do
         b <-  arr (+1) -< n+2*3

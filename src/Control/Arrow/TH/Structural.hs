@@ -6,10 +6,15 @@ import     Language.Haskell.Exts
 import Language.Haskell.Meta
 import Language.Haskell.TH.Utilities
 import Language.Haskell.TH (ExpQ)
-import Control.Arrow
-import Prelude hiding (id,(.))
-import Control.Category
 import Control.Applicative
+import Control.Category.Associative
+import Control.Category.Structural
+import Control.Category.Monoidal
+import Control.Category.Cartesian
+import Control.Categorical.Bifunctor
+import           Control.Category
+import           Prelude             hiding (id, (.),fst,snd)
+import           Control.Arrow hiding (first,second,(***),(&&&))
 
 pattern P a = PVar a
 pattern E a = Var a
@@ -23,9 +28,9 @@ fixTuple (P a) (E b) | toName a == toName b                 = [|id|]            
                      | otherwise                            = [| arr (\ $(return $ toPat $ PWildCard) -> $(return $ toExp $ E b)) |]  -- arr
 fixTuple pat@(TP a rest@(fmap toName . freeVars -> restFree)) (EP b rest2@(fmap toName . freeVars -> rest2Free))
           |  all (flip elem (toName <$> freeVars a)) (toName <$> freeVars b)
-              && (all (flip elem restFree) rest2Free)       = [| $(fixTuple a b) *** $(fixTuple rest rest2) |]                        -- First
-          | otherwise                                       = [| arr (\(a,b)->(b,a)) >>> $(fixTuple (TP rest a) (EP b rest2)) |]      -- swap
+              && (all (flip elem restFree) rest2Free)       = [| $(fixTuple a b) *** $(fixTuple rest rest2) |]                        -- ***
+          | otherwise                                       = [| swap >>> $(fixTuple (TP rest a) (EP b rest2)) |]      -- swap
 fixTuple pat@(TP a rest) (E b)
-          | elem (toName b) (toName <$> freeVars a)         = [| arr (\(a,b)->a) >>> $(fixTuple a (E b)) |]                           -- fst
-          | otherwise                                       = [| arr (\(a,b)->(b,a)) >>> $(fixTuple (TP rest a) (E b)) |]             -- swap
+          | elem (toName b) (toName <$> freeVars a)         = [| fst >>> $(fixTuple a (E b)) |]                           -- fst
+          | otherwise                                       = [| swap >>> $(fixTuple (TP rest a) (E b)) |]             -- swap
 fixTuple pat b                                              = [| arr (\ $(return $ toPat pat) -> $(return $ toExp b)) |] -- can't "categorize"

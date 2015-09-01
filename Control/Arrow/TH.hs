@@ -16,7 +16,6 @@ Portability :  TemplateHaskell,QuasiQuotes,ViewPatterns
 -}
 module Control.Arrow.TH (arrow,arrFixer) where
 import qualified Language.Haskell.Exts as E
-import Prelude hiding ((.))
 import Control.Category
 import Language.Haskell.Meta
 import Language.Haskell.TH
@@ -37,6 +36,15 @@ import Debug.Trace
 import Control.Lens
 import Control.Applicative
 import Control.Arrow.TH.Structural
+
+import Control.Category.Associative
+import Control.Category.Structural
+import Control.Category.Monoidal
+import Control.Category.Cartesian
+import Control.Categorical.Bifunctor
+import           Control.Category
+import           Prelude             hiding (id, (.),fst,snd)
+import           Control.Arrow hiding (first,second,(***),(&&&))
 
 type ArrowExp = ExpQ
 data NodeE =

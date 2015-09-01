@@ -1,3 +1,4 @@
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE Arrows #-}
 {-# LANGUAGE FlexibleContexts #-}
@@ -14,15 +15,22 @@
 
 module Auto where
 
+import Control.Category.Associative
+import Control.Category.Structural
+import Control.Category.Monoidal
+import Control.Category.Cartesian
+import Control.Categorical.Bifunctor
+import           Control.Category
+import           Prelude             hiding (id, (.),fst,snd)
+import           Control.Arrow hiding (first,second,(***),(&&&))
+import qualified Control.Arrow as A
 import           Control.Applicative
-import           Control.Arrow
 import           Control.Arrow.CCA
 import           Control.Arrow.CCA.Optimize
 import           Control.Category
 import           Control.Concurrent.Async
 import           Control.Monad
 import           Control.Monad.Fix
-import           Prelude                     hiding (id, (.))
 
 deriving instance MonadFix Concurrently
 instance Monad Concurrently where
@@ -38,6 +46,14 @@ runAutoIO = runAutoX . runAutoXIO
 runAutoIO_ :: AutoXIO a b -> a -> IO (Maybe b)
 runAutoIO_ f a = liftM fst $  (runAutoX . runAutoXIO) f a
 
+instance PFunctor (,) AutoXIO where
+    first (AutoXIO a)   = AutoXIO $ first a
+instance QFunctor (,) AutoXIO where
+    second (AutoXIO a)   = AutoXIO $ second a
+instance Bifunctor (,) AutoXIO where
+    (***) = (A.***)
+instance Contract (,) AutoXIO where
+    (&&&) = (A.&&&)
 instance Arrow AutoXIO where
     arr :: (b -> c) -> AutoXIO b c
     arr f     = AutoXIO $ AConsX $ \b -> return (Just $ f b,arr f)
@@ -77,6 +93,7 @@ testAutoM a (x:xs)  = do
 testAutoM_ :: Monad m => AutoX m a b -> [a] -> m [Maybe b]
 testAutoM_ a as = liftM fst $ testAutoM a as
 
+{-
 newtype AAuto m a b = A {runA :: m a (Maybe b,AAuto m a b)}
 instance ArrowChoice m => Category (AAuto m) where
     id = A $ arr (\a->(Just a,id))
@@ -103,6 +120,7 @@ instance ArrowChoice m => Arrow (AAuto m) where
     first a   = A $ proc (x, z) -> do
                   (y, a') <- runA a -< x
                   returnA -< (fmap (,z) y , first a')
+-}
 -- Instances
 instance Monad m => Category (AutoX m) where
     id    = AConsX $ \x -> return (Just x, id)
@@ -126,6 +144,13 @@ instance Monad m => Applicative (AutoX m r) where
                   return  (f <*> y, af' <*> ay')
 
 
+instance MonadFix m => PFunctor (,) (AutoX m) where
+    first = A.first
+instance MonadFix m => Contract (,) (AutoX m) where
+    (&&&) = (A.&&&)
+instance MonadFix m => QFunctor (,) (AutoX m) where
+    second = A.second
+instance MonadFix m => Bifunctor (,) (AutoX m) where
 instance MonadFix m => Arrow (AutoX m) where
     arr f     = AConsX $ \x -> return (Just (f x), arr f)
     first a   = AConsX $ \(x, z) -> do

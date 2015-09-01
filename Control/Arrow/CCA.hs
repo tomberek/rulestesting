@@ -37,7 +37,7 @@ class ArrowLoop a => ArrowCCA a where
 
 -- | from `arrows` package
 class (Arrow a, Arrow (f a)) => ArrowTransformer f a where
-	liftArrow :: a b c -> f a b c
+    liftArrow :: a b c -> f a b c
 
 newtype PKleisli a b = PKleisli {runPKleisli :: Kleisli IO a b} deriving (Category,ArrowLoop)
 rr :: PKleisli a b -> a -> IO b

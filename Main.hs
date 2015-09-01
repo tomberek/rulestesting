@@ -15,9 +15,9 @@ main = do
     printCCA ( $(norm example4b))
     putStrLn ""
     print "Just proc-do desugar:"
-    printCCA line3
+    printCCA line3a
     print "CCA optimized:"
-    printCCA ( $(norm line3))
+    printCCA ( $(norm line3a))
     putStrLn ""
     print "Just proc-do desugar:"
     printCCA line2

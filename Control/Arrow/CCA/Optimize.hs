@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE DeriveDataTypeable #-}
@@ -21,14 +22,19 @@ module Control.Arrow.CCA.Optimize
     (norm, normOpt, fromAExp, normalize,normalizeTrace,
     runCCNF, nth', runIt,
     pprNorm, pprNormOpt, printCCA, ASyn(..),AExp(..),ArrowCCA(..),(.),id
-    ,swap,dup
     --cross, dup, swap, assoc, unassoc, juggle, trace, mirror, untag, tagT, untagT,
     --swapE, dupE
     ) where
 
+import Control.Category.Associative
+import Control.Category.Structural
+import Control.Category.Monoidal
+import Control.Category.Cartesian
+import Control.Categorical.Bifunctor
 import           Control.Category
-import           Prelude             hiding (id, (.))
-import           Control.Arrow
+import           Prelude             hiding (id, (.),fst,snd)
+import           Control.Arrow hiding (first,second,(***),(&&&))
+import qualified Control.Arrow as A
 import           Control.Arrow.CCA
 import           Control.Arrow.TH
 import           Control.Monad(liftM)
@@ -39,7 +45,7 @@ import           Language.Haskell.TH.Utilities
 import           Data.Bitraversable
 import           Control.Parallel
 import qualified Control.Lens as L
-import Control.Lens
+import Control.Lens hiding (Bifunctor)
 import qualified Debug.Trace
 import Data.Data (Data(..))
 import qualified Data.Generics       as G (everywhere, mkT)
@@ -75,15 +81,15 @@ data AExp
   -- Braided and Symmetric
   | Swap
   | Second AExp
-  {- Closed, not needed
-  | Apply -- (f,a) = f a   arr (\(f,a)->f a)
-  | Curry
-  | Uncurry
-  -- Monoidal, not needed
+  -- Monoidal
   | Idr
   | Idl
   | Coidl
   | Coidr
+  {- Closed, not needed
+  | Apply -- (f,a) = f a   arr (\(f,a)->f a)
+  | Curry
+  | Uncurry
   -}
 
 instance L.Plated AExp where
@@ -134,6 +140,10 @@ eqM (Lift f) (Lift g) = areExpAEq' f g
 eqM Associate Associate = return True
 eqM Disassociate Disassociate = return True
 eqM Swap Swap = return True
+eqM Coidl Coidl = return True
+eqM Coidr Coidr = return True
+eqM Idr Idr = return True
+eqM Idl Idl = return True
 eqM _ _ = return False
 
 instance Eq AExp where
@@ -162,6 +172,10 @@ instance Show AExp where
     show Swap = "Swap"
     show Fst = "Fst"
     show Snd = "Snd"
+    show Coidl = "Coidl"
+    show Coidr = "Coidr"
+    show Idr = "Idr"
+    show Idl = "Idl"
     show Associate = "Associate"
     show Disassociate = "Disassociate"
     show (Arr _) = "Arr"
@@ -187,6 +201,26 @@ newtype ASyn (m :: * -> *) b c = AExp AExp
 instance Category (ASyn m) where
     id = AExp Id
     AExp g . AExp f = AExp (f :>>> g)
+instance QFunctor p (ASyn m) where
+    second (AExp f) = AExp (Second f)
+instance PFunctor p (ASyn m) where
+    first (AExp f) = AExp (First f)
+instance Bifunctor p (ASyn m) where
+    AExp f *** AExp g = AExp $ f :*** g
+instance Contract p (ASyn m) where
+    AExp f &&& AExp g = AExp $ f :&&& g
+instance HasLeftIdentity () p (ASyn m) where
+    coidl = AExp Coidl
+    idl = AExp Idl
+instance HasRightIdentity () p (ASyn m) where
+    coidr = AExp Coidr
+    idr = AExp Idr
+instance HasIdentity () (,) (ASyn m)
+instance Weaken p (ASyn m) where
+    fst = AExp Fst
+    snd = AExp Snd
+instance Symmetric p (ASyn m) where
+    swap = AExp Swap
 instance Arrow (ASyn m) where
     arr _ = error "ASyn arr not implemented"
     first (AExp f) = AExp (First f)
@@ -234,7 +268,6 @@ rules = [
         , ([| \(a,b) -> b|],Snd)
         , ([| arr snd |],Snd)
         , ([| \(a,b) -> (b,a)|],Swap)
-        , ([| arr Control.Arrow.CCA.Optimize.swap |],Swap)
         , ([| arr swap |],Swap)
         , ([| arr (\(a,b) -> (b,a))|],Swap)
         , ([| \(a,(b,c)) -> ((a,b),c)|],Disassociate)
@@ -293,12 +326,16 @@ normOpt (AExp e) = do
 fromAExp :: AExp -> ExpQ
 
 fromAExp Id = [|id|] -- Categorical constructors should not be around after second stage
-fromAExp Diag = [| arr dup |]
-fromAExp Fst = [| arr fst |]
-fromAExp Snd = [| arr snd |]
+fromAExp Diag = [| diag |]
+fromAExp Fst = [| fst |]
+fromAExp Snd = [| snd |]
 fromAExp Associate = [| arr (\((a,b),c)->(a,(b,c))) |]
 fromAExp Disassociate = [| arr (\(a,(b,c))->((a,b),c)) |]
-fromAExp Swap = [| arr swap |]
+fromAExp Swap = [| swap |]
+fromAExp Coidr = [| coidr |]
+fromAExp Coidl = [| coidl |]
+fromAExp Idl = [| idl |]
+fromAExp Idr = [| idr |]
 
 -- Should not be arround after second rewrite pass:
 fromAExp (ArrFirst f) = appE [|arr|] f
@@ -386,7 +423,7 @@ normalize ( Second Swap :>>> Associate :>>> First Swap) = Associate :>>> Swap :>
 ---}
 
 -- Braided
-normalize (Diag :>>> ArrM f) = ArrM ( [| dupE . $f |])
+normalize (Diag :>>> ArrM f) = ArrM ( [| diagE . $f |])
 normalize (Swap :>>> Swap) = Id
 normalize (Swap :>>> Fst) = Snd
 normalize (Swap :>>> Snd) = Fst
@@ -396,7 +433,7 @@ normalize ((f :*** g) :>>> (h :*** i)) = (f :>>> h) :*** (g :>>> i) -- combine s
 normalize ((f :&&& g) :>>> (h :*** i)) = (f :>>> h) :&&& (g :>>> i) -- combine &&& followed by ***
 normalize ((h :>>> (f :*** g)) :>>> Swap) = h :>>> Swap :>>> (g :*** f) -- bubble swap to the left
 -- Never a problem combining Diag with Arr, no rules have Diag on the right.
-normalize (Diag :>>> Arr f) = Arr ( f `o` dupE)
+normalize (Diag :>>> Arr f) = Arr ( f `o` diagE)
 
 normalize ((Diag :>>> ArrFirst f) :>>> Swap) = Diag :>>> ArrSecond f
 normalize ((Diag :>>> ArrSecond f) :>>> Swap) = Diag :>>> ArrFirst f
@@ -420,15 +457,15 @@ normalizeA (ArrM f :*** Arr g) = ArrM $ f `crossME` [| return . $g |]
 normalizeA (Arr f :*** ArrM g) = ArrM $ [| return . $f |]  `crossME` g
 --normalizeA (ArrM f :*** ArrM g) = ArrM $ f `crossME` g
 
-normalizeA (Arr f :&&& Arr g) = Arr $ (f `crossE` g) `o` dupE
-normalizeA (ArrM f :&&& Arr g) = ArrM $ (f `crossME` [| return . $g |]) `o` dupE
-normalizeA (Arr f :&&& ArrM g) = ArrM $ ([| return . $f |]  `crossME` g) `o` dupE
+normalizeA (Arr f :&&& Arr g) = Arr $ (f `crossE` g) `o` diagE
+normalizeA (ArrM f :&&& Arr g) = ArrM $ (f `crossME` [| return . $g |]) `o` diagE
+normalizeA (Arr f :&&& ArrM g) = ArrM $ ([| return . $f |]  `crossME` g) `o` diagE
 normalizeA (ArrFirst f) = Arr (f `crossE` idE)
 normalizeA (ArrSecond f) = Arr (idE `crossE` f)
 normalizeA (f :>>> (g :>>> h)) = f :>>> (g :>>> h) -- Added by TOM
 normalizeA ((f :>>> g) :>>> h) = f :>>> (g :>>> h) -- Added by TOM
 --normalizeA Id = Arr idE
---normalizeA Diag = Arr dupE
+--normalizeA Diag = Arr diagE
 --normalizeA Swap = Arr swapE
 --normalizeA Fst = Arr [|fst|]
 --normalizeA Snd = Arr [|snd|]
@@ -459,10 +496,11 @@ runIt _ = nth' 0
 -- Auxiliary Functions
 -- ===================
 
-dup :: t -> (t, t)
-dup x = (x, x)
-swap :: (t1, t) -> (t, t1)
-swap (x, y) = (y, x)
+--dup :: t -> (t, t)
+--dup x = (x, x)
+-- in Control.Category.Monoidal
+--swap :: (t1, t) -> (t, t1)
+--swap (x, y) = (y, x)
 unassoc :: (t1, (t2, t)) -> ((t1, t2), t)
 unassoc (x, (y, z)) = ((x, y), z)
 assoc :: ((t, t1), t2) -> (t, (t1, t2))
@@ -514,9 +552,9 @@ f `crossE` g = appE (appE [|cross|] f) g
 crossME :: ExpQ -> ExpQ -> ExpQ
 f `crossME` g = appE (appE [|crossM|] f) g
 
-idE,dupE,swapE,assocE,assocE',juggleE,tagE,untagE :: ExpQ
+idE,diagE,swapE,assocE,assocE',juggleE,tagE,untagE :: ExpQ
 idE = [|id|]
-dupE = [|dup|]
+diagE = [|diag|]
 swapE = [|swap|]
 assocE = [|assoc|]
 assocE' = [|unassoc|]

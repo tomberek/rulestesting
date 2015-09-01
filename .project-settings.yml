@@ -10,7 +10,11 @@ environment: ghc-7.8-stable-14.09
 auto-hidden: []
 cabal-file: project.cabal
 version: 1
-extra-packages: ! 'Hackage: th-alpha 0.2.0.2'
+extra-packages: ! 'Hackage: th-alpha 0.2.0.2
+
+  Git: https://github.com/gelisam/category-syntax 3074f23f8597569fad4b1c4480b8a5efd6d098b2'
 ghc-args:
 - -fenable-rewrite-rules
-excluded-modules: []
+excluded-modules:
+- Arrow.hs
+- src/Morte/Core.hs
