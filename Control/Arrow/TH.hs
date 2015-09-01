@@ -36,6 +36,7 @@ import Data.Maybe
 import Debug.Trace
 import Control.Lens
 import Control.Applicative
+import Control.Arrow.TH.Structural
 
 type ArrowExp = ExpQ
 data NodeE =
@@ -55,14 +56,18 @@ makeLenses ''NodeE
 arrow :: QuasiQuoter
 arrow = QuasiQuoter {
     quoteExp = \input -> case E.parseExpWithMode E.defaultParseMode{E.extensions=[E.EnableExtension E.Arrows],E.fixities=Just (E.baseFixities)} input of
-        E.ParseOk result -> buildExp nodes graph [0] [] >>= arrFixer
+        E.ParseOk result -> do
+            let allGoals = findUnit nodes
+            --buildExp nodes graph [0] [] >>= arrFixer
+            buildExp nodes graph allGoals [] >>= arrFixer
                 where (graph,nodes) = process [] result
         E.ParseFailed l err -> error $ show l ++ show err
       , quotePat = error "cannot be patterns."
       , quoteDec = error "cannot be declarations."
       , quoteType = error "cannot be types."
         }
-
+findUnit :: IntMap NodeE -> [Int]
+findUnit (toList -> l) = map fst $ Prelude.filter ( (== 0)  . length . freeVars . snd) l
 newtype P = P NodeE
 instance Eq NodeE where
     (==) = (==) `on` view i
@@ -81,10 +86,12 @@ buildExp _ _ [] [Expression _ _ e] = e
 buildExp _ _ [g] [Expression v _ e] | g==v = e
 buildExp (fst . findMax -> target) _ _ exps | elem target (map getEV exps) = getEE . fromJust $ Data.List.find ( (==) target . getEV) exps -- got target early, effects?
 buildExp intmap@(fst . findMax -> target) graph [] exps = buildExp intmap graph [target] exps
-buildExp intmap graph goals exps = Debug.Trace.trace ("called " ++ show goals) $ buildExp intmap graph newGoals newExps
+buildExp intmap graph goals exps = ifProgress
     where
+        ifProgress = if (goals==newGoals) && (exps==newExps) then error "loop detected in arrow TH" else Debug.Trace.trace ("called " ++ show goals) $ buildExp intmap graph newGoals newExps
         flag ind = all (flip elem (map getEV exps)) $ (transposeG graph) ^. ix ind -- tells if a vertex is obtainable
-        flags = findIndices flag goals -- lists obtainable goal indeces
+        flags = findIndices flag goals -- lists obtainable goal indices
+        flagsWithEmpty = [head flags]
         (newGoals,newExps) = Debug.Trace.trace ("flagged goals: " ++ show flags ++ "out of " ++ show goals ++ " and exps " ++ show exps)
                                 $ step (goals,exps) (map ( (Data.List.!!) goals) flags)
         step (goals',exps') [] = (goals',exps')
@@ -109,10 +116,13 @@ createConnection 0 [] _ arrowExp = [| $arrowExp |] -- should only be the origina
 createConnection _ [] e arrowExp = [| arr (\a -> $(returnQ $ toExp e)) >>> $arrowExp |] -- should only be the original req. This doesn't visit literal signaled arrows. No SIDE EFFECTS?
 createConnection _ exps thisExp arrowExp = defaultConnection exps thisExp arrowExp
 
+-- tuplize may break for oddly shaped tuples
 defaultConnection :: [Expression] -> E.Exp -> ArrowExp -> ExpQ
 defaultConnection exps thisExp arrowExp = [| $(foldl1 (&:&) (getEE <$> exps))
-                                          >>> arr (\ $(returnQ . toPat $ tuplize $ getPattern <$> exps) -> $(returnQ $ toExp thisExp))
+                                          -- >>> arr (\ $(returnQ . toPat $ tuplize $ getPattern <$> exps) -> $(returnQ $ toExp thisExp))
+                                             >>> $(fixTuple (tuplize $ getPattern <$> exps) thisExp)
                                           >>> $arrowExp |]
+
 
 (&:&) :: ExpQ -> ExpQ -> ExpQ
 expr1 &:& expr2 = uInfixE expr1 (varE $ mkName "&&&") expr2
@@ -159,4 +169,6 @@ arrFixer = rewriteM arg
             fmap Just [| delay' (returnQ $(lift e)) $(returnQ e) |]
         arg (VarE (Name (OccName "returnA") _)) =
             fmap Just [| arr' (returnQ $([| Q.id |] >>= lift)) Q.id |]
+        arg (AppE (ConE (Name (OccName "Lift") _)) e) =
+            fmap Just $ returnQ e
         arg _ = return Nothing

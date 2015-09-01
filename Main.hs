@@ -6,22 +6,19 @@ import           Prelude                     hiding (id, (.))
 import           Control.Arrow.CCA.Optimize
 import           Examples
 import           Auto
-import Control.Category.Monoidal
+
 main :: IO ()
 main = do
-    print a
-    print b
-    
     print "Just proc-do desugar:"
     printCCA example4b
     print "CCA optimized:"
     printCCA ( $(norm example4b))
-    print ""
+    putStrLn ""
     print "Just proc-do desugar:"
     printCCA line3
     print "CCA optimized:"
     printCCA ( $(norm line3))
-    print ""
+    putStrLn ""
     print "Just proc-do desugar:"
     printCCA line2
     print "CCA optimized:"

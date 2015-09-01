@@ -3,20 +3,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE TypeFamilies               #-}
-{- |
-Module      :  Control.Arrow.CCA
-Description :  ArrowDelay
-Copyright   :  (c) 2015 Thomas Bereknyei
-License     :  BSD3
-Maintainer  :  Thomas Bereknyei <tomberek@gmail.com>
-Stability   :  unstable
-Portability :  MultiParamTypeClasses
 
-Originally from CCA package: <https://hackage.haskell.org/package/CCA-0.1.5.2>
-
-Added ArrowEffect in order to model effectful arrows.
-Adding Swap,Id,Dup,Diag for CCC normalization
--}
 module Control.Arrow.CCA where
 
 import           Control.Arrow
@@ -47,6 +34,10 @@ class ArrowLoop a => ArrowCCA a where
     arrM f = arr $ \a -> runIdentity $ f a
     arrM' :: ExpQ -> (b -> (M a) c) -> a b c
     arrM' _ = arrM
+
+-- | from `arrows` package
+class (Arrow a, Arrow (f a)) => ArrowTransformer f a where
+	liftArrow :: a b c -> f a b c
 
 newtype PKleisli a b = PKleisli {runPKleisli :: Kleisli IO a b} deriving (Category,ArrowLoop)
 rr :: PKleisli a b -> a -> IO b

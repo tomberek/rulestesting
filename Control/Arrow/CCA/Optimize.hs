@@ -21,6 +21,7 @@ module Control.Arrow.CCA.Optimize
     (norm, normOpt, fromAExp, normalize,normalizeTrace,
     runCCNF, nth', runIt,
     pprNorm, pprNormOpt, printCCA, ASyn(..),AExp(..),ArrowCCA(..),(.),id
+    ,swap,dup
     --cross, dup, swap, assoc, unassoc, juggle, trace, mirror, untag, tagT, untagT,
     --swapE, dupE
     ) where
@@ -57,7 +58,8 @@ data AExp
   | Loop AExp       -- simple loop, needed for rec?
   | LoopD ExpQ ExpQ -- loop with delayed feedback
   | Delay ExpQ
-  | Lft AExp
+  | Lft AExp -- arrow choice
+  | Lift ExpQ -- arrow lifted
 
   | ArrFirst ExpQ -- allows for two stages of optimization
   | ArrSecond ExpQ -- allows for two stages of optimization
@@ -128,10 +130,27 @@ eqM Id Id = return True
 eqM Diag Diag = return True
 eqM Fst Fst = return True
 eqM Snd Snd = return True
+eqM (Lift f) (Lift g) = areExpAEq' f g
 eqM Associate Associate = return True
 eqM Disassociate Disassociate = return True
 eqM Swap Swap = return True
 eqM _ _ = return False
+
+instance Eq AExp where
+    First f == First g = f==g
+    Second f == Second g = f==g
+    (f :>>> g) == (h :>>> i) = f == h && g == i
+    (f :*** g) == (h :*** i) = f == h && g == i
+    (f :&&& g) == (h :&&& i) = f == h && g == i
+    (Loop f) == (Loop g) = f == g
+    Id == Id = True
+    Diag == Diag = True
+    Fst == Fst = True
+    Snd == Snd = True
+    Associate == Associate = True
+    Disassociate == Disassociate = True
+    Swap == Swap = True
+    _ == _ = False
 
 infixr 1 :>>>
 infixr 3 :***
@@ -158,6 +177,7 @@ instance Show AExp where
     show (LoopD _ _) = "LoopD"
     show (Delay _) = "Delay"
     show (Lft _) = "Lft"
+    show (Lift _) = "Lift"
 instance Show (ASyn m a b) where
     show (AExp x) = show x
 
@@ -214,9 +234,22 @@ rules = [
         , ([| \(a,b) -> b|],Snd)
         , ([| arr snd |],Snd)
         , ([| \(a,b) -> (b,a)|],Swap)
+        , ([| arr Control.Arrow.CCA.Optimize.swap |],Swap)
+        , ([| arr swap |],Swap)
         , ([| arr (\(a,b) -> (b,a))|],Swap)
         , ([| \(a,(b,c)) -> ((a,b),c)|],Disassociate)
         , ([| \((a,b),c) -> (a,(b,c))|],Associate) -- so far only first levels
+        -- experimental. can this be automated?
+        , ([| \(a,b) -> (a,a) |],Fst :>>> Diag)
+        , ([| \(a,b) -> (b,b) |],Snd :>>> Diag)
+        , ([| \((a,b),(c,d)) -> (a,c) |],Fst :*** Fst)
+        , ([| \((a,b),(c,d)) -> (a,d) |],Fst :*** Snd)
+        , ([| \((a,b),(c,d)) -> (b,c) |],Snd :*** Fst)
+        , ([| \((a,b),(c,d)) -> (b,d) |],Snd :*** Snd)
+        , ([| \((a,b),(c,d)) -> (c,a) |],Fst :*** Fst :>>> Swap)
+        , ([| \((a,b),(c,d)) -> (d,a) |],Fst :*** Snd :>>> Swap)
+        , ([| \((a,b),(c,d)) -> (c,b) |],Snd :*** Fst :>>> Swap)
+        , ([| \((a,b),(c,d)) -> (d,b) |],Snd :*** Snd :>>> Swap)
         ]
 
 -- | Monadic Find, coppied from another library (sorry, forgot which)
@@ -280,6 +313,7 @@ fromAExp (LoopD i f) = appE (appE [|loopD|] i) f
 fromAExp (ArrM i) = appE [|arrM|] i
 fromAExp (Delay i) = appE [|delay|] i
 fromAExp (Lft f) = appE [|left|] (fromAExp f)
+fromAExp (Lift f) = f
 fromAExp (f :*** g) = infixE (Just (fromAExp f)) [|(***)|] (Just (fromAExp g)) -- Not in original CCA. 2015-TB
 fromAExp (f :&&& g) = infixE (Just (fromAExp f)) [|(&&&)|] (Just (fromAExp g)) -- Not in original CCA. 2015-TB
 
@@ -333,11 +367,16 @@ normalize (Diag :>>> Snd) = Id
 normalize (Diag :>>> (f :*** g) ) = f :&&& g
 normalize ((Fst :>>> f) :&&& (Snd :>>> g)) = f :*** g
 normalize ((Snd :>>> f) :&&& (Fst :>>> g)) = g :*** f
+normalize ((f :*** g) :>>> Snd) = Snd :>>> g
+normalize ((f :*** g) :>>> Fst) = Fst :>>> f
 normalize ((f :&&& g) :>>> Snd) = g
 normalize ((f :&&& g) :>>> Fst) = f
+normalize (Fst :&&& Snd) = Id
+normalize (Id :&&& Id) = Diag
 normalize ((f :&&& g) :>>> Swap) = g :&&& f
 normalize (Id :&&& g) = Diag :>>> Second g
 normalize (f :&&& Id) = Diag :>>> First f
+normalize ((Diag :>>> f) :&&& (Diag :>>> g)) = Diag :>>> (f :*** g)
 
 -- | Associative. Probably not handy yet
 {-normalize ( Second Disassociate :>>> Disassociate :>>> First Disassociate ) = Disassociate :>>> Disassociate
@@ -349,7 +388,13 @@ normalize ( Second Swap :>>> Associate :>>> First Swap) = Associate :>>> Swap :>
 -- Braided
 normalize (Diag :>>> ArrM f) = ArrM ( [| dupE . $f |])
 normalize (Swap :>>> Swap) = Id
+normalize (Swap :>>> Fst) = Snd
+normalize (Swap :>>> Snd) = Fst
 normalize (Diag :>>> Swap) = Diag
+normalize ((f :*** g) :>>> Swap) = Swap :>>> (g :*** f)  -- bubble Swap to the left
+normalize ((f :*** g) :>>> (h :*** i)) = (f :>>> h) :*** (g :>>> i) -- combine sequential ***
+normalize ((f :&&& g) :>>> (h :*** i)) = (f :>>> h) :&&& (g :>>> i) -- combine &&& followed by ***
+normalize ((h :>>> (f :*** g)) :>>> Swap) = h :>>> Swap :>>> (g :*** f) -- bubble swap to the left
 -- Never a problem combining Diag with Arr, no rules have Diag on the right.
 normalize (Diag :>>> Arr f) = Arr ( f `o` dupE)
 
@@ -380,8 +425,8 @@ normalizeA (ArrM f :&&& Arr g) = ArrM $ (f `crossME` [| return . $g |]) `o` dupE
 normalizeA (Arr f :&&& ArrM g) = ArrM $ ([| return . $f |]  `crossME` g) `o` dupE
 normalizeA (ArrFirst f) = Arr (f `crossE` idE)
 normalizeA (ArrSecond f) = Arr (idE `crossE` f)
-normalizeA (f :>>> (g :>>> h)) = (f :>>> g) :>>> h -- Added by TOM
-normalizeA ((f :>>> g) :>>> h) = (f :>>> g) :>>> h -- Added by TOM
+normalizeA (f :>>> (g :>>> h)) = f :>>> (g :>>> h) -- Added by TOM
+normalizeA ((f :>>> g) :>>> h) = f :>>> (g :>>> h) -- Added by TOM
 --normalizeA Id = Arr idE
 --normalizeA Diag = Arr dupE
 --normalizeA Swap = Arr swapE
