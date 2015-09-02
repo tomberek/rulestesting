@@ -79,15 +79,15 @@ line3 = $(norm [arrow|
         (g,h) <- id -< (c,e)
         swap -< (g,d)
         |])
-line3a :: (forall p. HasLeftIdentity ((),()) p a,forall p1. HasLeftIdentity () p1 a,Symmetric (,) a,Weaken (,) a,ArrowCCA a) => a (c,b) ()
+line3a :: (Contract (,) a,Symmetric (,) a,Weaken (,) a,ArrowCCA a) => a (c,b) ((),())
 line3a = $(norm [arrow|
     proc (a,b) -> do
         (c,d) <- swap -< (a,b)
         (e,f) <- id -< ((),())
         (g,h) <- swap -< (c,e)
         (i,j) <- swap -< (f,d)
-        (m,n) <- coidl -< ()
-        (k,l) <- coidl -< ()
+        (m,n) <- id -< ((),())
+        (k,l) <- id -< ((),())
         (q,r) <- swap -< (h,k)
         (s,y) <- swap -< (l,i)
         (o,p) <- swap -< (n,g)

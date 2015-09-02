@@ -17,4 +17,5 @@ ghc-args:
 - -fenable-rewrite-rules
 excluded-modules:
 - Arrow.hs
+- src/Control/Category/Monoidal.hs
 - src/Morte/Core.hs

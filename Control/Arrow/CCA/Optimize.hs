@@ -31,6 +31,7 @@ import Control.Category.Structural
 import Control.Category.Monoidal
 import Control.Category.Cartesian
 import Control.Categorical.Bifunctor
+
 import           Control.Category
 import           Prelude             hiding (id, (.),fst,snd)
 import           Control.Arrow hiding (first,second,(***),(&&&))
