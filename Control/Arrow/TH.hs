@@ -22,7 +22,7 @@ import Language.Haskell.TH
 import Language.Haskell.TH.Syntax
 import Language.Haskell.TH.Quote
 import Control.Arrow.CCA
-import Control.Arrow
+import Control.Arrow hiding ((&&&))
 import qualified Control.Category as Q
 import Data.List (mapAccumL,findIndices,elemIndex,(\\),(!!),delete,nub,find)
 import Data.Graph
@@ -96,7 +96,8 @@ buildExp (fst . findMax -> target) _ _ exps | elem target (map getEV exps) = get
 buildExp intmap@(fst . findMax -> target) graph [] exps = buildExp intmap graph [target] exps
 buildExp intmap graph goals exps = ifProgress
     where
-        ifProgress = if (goals==newGoals) && (exps==newExps) then error "loop detected in arrow TH" else Debug.Trace.trace ("called " ++ show goals) $ buildExp intmap graph newGoals newExps
+        ifProgress = if (goals==newGoals) && (exps==newExps) then buildExp intmap graph (vertices graph)  exps  --error "loop detected in arrow TH"
+                                                             else Debug.Trace.trace ("called " ++ show goals) $ buildExp intmap graph newGoals newExps
         flag ind = all (flip elem (map getEV exps)) $ (transposeG graph) ^. ix ind -- tells if a vertex is obtainable
         flags = findIndices flag goals -- lists obtainable goal indices
         flagsWithEmpty = [head flags]
@@ -126,10 +127,16 @@ createConnection _ exps thisExp arrowExp = defaultConnection exps thisExp arrowE
 
 -- tuplize may break for oddly shaped tuples
 defaultConnection :: [Expression] -> E.Exp -> ArrowExp -> ExpQ
-defaultConnection exps thisExp arrowExp = [| $(foldl1 (&:&) (getEE <$> exps))
-                                          -- >>> arr (\ $(returnQ . toPat $ tuplize $ getPattern <$> exps) -> $(returnQ $ toExp thisExp))
-                                             >>> $(fixTuple (tuplize $ getPattern <$> exps) thisExp)
-                                          >>> $arrowExp |]
+--defaultConnection exps thisExp arrowExp =
+defaultConnection [e1] thisExp arrowExp = [| $(getEE e1)
+     >>> $(fixTuple (getPattern e1) thisExp)
+    >>> $arrowExp |]
+defaultConnection [e1,e2] thisExp arrowExp =
+    --[| $(foldl1 (&:&) (getEE <$> exps))
+    [| $(getEE e1) &&& $(getEE e2)
+    -- >>> arr (\ $(returnQ . toPat $ tuplize $ getPattern <$> exps) -> $(returnQ $ toExp thisExp))
+     >>> $(fixTuple (tuplize $ getPattern <$> [e1,e2]) thisExp)
+    >>> $arrowExp |]
 
 
 (&:&) :: ExpQ -> ExpQ -> ExpQ

@@ -87,6 +87,7 @@ data AExp
   | Idl
   | Coidl
   | Coidr
+  | Terminate
   {- Closed, not needed
   | Apply -- (f,a) = f a   arr (\(f,a)->f a)
   | Curry
@@ -145,6 +146,7 @@ eqM Coidl Coidl = return True
 eqM Coidr Coidr = return True
 eqM Idr Idr = return True
 eqM Idl Idl = return True
+eqM Terminate Terminate = return True
 eqM _ _ = return False
 
 instance Eq AExp where
@@ -193,6 +195,7 @@ instance Show AExp where
     show (Delay _) = "Delay"
     show (Lft _) = "Lft"
     show (Lift _) = "Lift"
+    show (Terminate) = "Terminate"
 instance Show (ASyn m a b) where
     show (AExp x) = show x
 
@@ -217,6 +220,8 @@ instance HasRightIdentity () p (ASyn m) where
     coidr = AExp Coidr
     idr = AExp Idr
 instance HasIdentity () (,) (ASyn m)
+instance HasTerminal () (ASyn m) where
+    terminate = AExp Terminate
 instance Weaken p (ASyn m) where
     fst = AExp Fst
     snd = AExp Snd
@@ -337,6 +342,7 @@ fromAExp Coidr = [| coidr |]
 fromAExp Coidl = [| coidl |]
 fromAExp Idl = [| idl |]
 fromAExp Idr = [| idr |]
+fromAExp Terminate = [| terminate |]
 
 -- Should not be arround after second rewrite pass:
 fromAExp (ArrFirst f) = appE [|arr|] f
@@ -399,10 +405,12 @@ normalize (First Id) = Id
 normalize (Second Id) = Id
 normalize (Lft Id) = Id
 
+-- | Terminal
+normalize (f :>>> Terminate) = Terminate
 -- Cartesian
 normalize (Diag :>>> Fst) = Id
 normalize (Diag :>>> Snd) = Id
-normalize (Diag :>>> (f :*** g) ) = f :&&& g
+--normalize (Diag :>>> (f :*** g) ) = f :&&& g
 normalize ((Fst :>>> f) :&&& (Snd :>>> g)) = f :*** g
 normalize ((Snd :>>> f) :&&& (Fst :>>> g)) = g :*** f
 normalize ((f :*** g) :>>> Snd) = Snd :>>> g

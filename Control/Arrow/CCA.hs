@@ -1,8 +1,11 @@
+{-# LANGUAGE FunctionalDependencies #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE TypeFamilies               #-}
+{-# LANGUAGE ScopedTypeVariables        #-}
 
 module Control.Arrow.CCA where
 
@@ -11,6 +14,10 @@ import           Control.Category         (Category)
 import           Control.Concurrent.Async
 import           Control.Monad.Identity
 import           Language.Haskell.TH
+import Control.Category.Monoidal
+import Control.Category
+import Control.Category.Structural
+import Prelude hiding (fst,snd,(.),id)
 
 -- | An @'ArrowCCA'@ is a typeclass that captures causual commutative arrows.
 -- Any instance must also be an instance of 'ArrowLoop'.
@@ -19,6 +26,10 @@ import           Language.Haskell.TH
 -- Laws:
 -- `first f >>> second g == second g >>> first f`
 -- `init i *** init j == init (i,j)`
+class Category k => HasTerminal i k | k -> i where
+    terminate :: k a i
+instance HasTerminal () (->) where
+    terminate = const ()
 class ArrowLoop a => ArrowCCA a where
     arr' :: ExpQ -> (b->c) -> a b c
     arr' _ = arr

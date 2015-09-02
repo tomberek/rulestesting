@@ -1,5 +1,4 @@
 {-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeOperators #-}
@@ -7,7 +6,9 @@
 {-# LANGUAGE QuasiQuotes     #-}
 {-# LANGUAGE TypeFamilies    #-}
 {-# LANGUAGE LambdaCase    #-}
+{-# LANGUAGE AllowAmbiguousTypes    #-}
 module Examples where
+import           Control.Arrow.CCA
 import           Control.Arrow.CCA.Optimize
 import           Control.Arrow.TH
 import           Control.Arrow hiding ((&&&),(***))
@@ -71,23 +72,24 @@ line2 = [arrow|
     () <- cup (w,x)
     -}
 
-line3 :: (Symmetric (,) a,HasIdentity () (,) a,Weaken (,) a,Contract (,) a,ArrowCCA a) => a (b,c) (b,c)
+line3 :: (HasTerminal () a, Symmetric (,) a,HasIdentity () (,) a,Weaken (,) a,Contract (,) a,ArrowCCA a) => a (b,c) (b,c)
 line3 = $(norm [arrow|
     proc (a,b) -> do
         (c,d) <- swap -< (a,b)
-        (e,f) <- id -< ((),())
+        (e,f) <- (terminate ) *** (terminate ) -< (a,b)
         (g,h) <- id -< (c,e)
         swap -< (g,d)
         |])
-line3a :: (Contract (,) a,Symmetric (,) a,Weaken (,) a,ArrowCCA a) => a (c,b) ((),())
+
+line3a :: (HasTerminal () a, Contract (,) a,Symmetric (,) a,HasIdentity () (,) a,Weaken (,) a,ArrowCCA a) => a (c,b) ((),())
 line3a = $(norm [arrow|
     proc (a,b) -> do
         (c,d) <- swap -< (a,b)
-        (e,f) <- id -< ((),())
+        (e,f) <- terminate *** terminate -< ((),())
         (g,h) <- swap -< (c,e)
         (i,j) <- swap -< (f,d)
-        (m,n) <- id -< ((),())
-        (k,l) <- id -< ((),())
+        (m,n) <- terminate *** terminate -< ((),())
+        (k,l) <- terminate *** terminate -< ((),())
         (q,r) <- swap -< (h,k)
         (s,y) <- swap -< (l,i)
         (o,p) <- swap -< (n,g)
