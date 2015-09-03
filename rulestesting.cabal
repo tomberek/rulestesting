@@ -18,6 +18,7 @@ library
   exposed-modules:     Control.Arrow.CCA,
                        Control.Arrow.CCA.Optimize,
                        Control.Arrow.TH,
+                       Control.Arrow.TH.Structural,
                        Language.Haskell.TH.Utilities
   build-depends:       base >= 4.7 && < 5
                        ,template-haskell
@@ -33,7 +34,9 @@ library
                        ,HTTP
                        ,lens
                        ,th-alpha
-                       ,categories
+                       ,category-syntax
+                       ,bifunctors
+                       ,parallel
   default-language:    Haskell2010
 
 executable rulestesting
@@ -55,13 +58,15 @@ executable rulestesting
                        ,HTTP
                        ,lens
                        ,th-alpha
-                       ,categories
+                       ,category-syntax
+                       ,bifunctors
+                       ,parallel
   default-language:    Haskell2010
 
 test-suite rulestesting-test
   type:               exitcode-stdio-1.0
   main-is:            Main.hs
-  ghc-options:         -threaded -rtsopts -with-rtsopts=-N
+  ghc-options:         -O0
   build-depends:       base
                      , rulestesting
                        ,template-haskell
@@ -77,6 +82,8 @@ test-suite rulestesting-test
                        ,HTTP
                        ,lens
                        ,th-alpha
-                       ,categories
+                       ,category-syntax
+                       ,bifunctors
+                       ,parallel
   default-language:    Haskell2010
 

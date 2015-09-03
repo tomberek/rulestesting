@@ -32,11 +32,10 @@ import           Control.Concurrent.Async
 import           Control.Monad
 import           Control.Monad.Fix
 
-deriving instance MonadFix Concurrently
-instance Monad Concurrently where
-  return = pure
-  Concurrently a >>= f =
-    Concurrently $ a >>= runConcurrently . f
+-- instance Monad Concurrently where
+--   return = pure
+--   Concurrently a >>= f =
+--     Concurrently $ a >>= runConcurrently . f
 
 newtype AutoXIO a b = AutoXIO {runAutoXIO :: AutoX IO a b} deriving (Functor,Applicative,Category,Alternative,ArrowChoice,ArrowLoop)
 autoIO :: (a -> IO (Maybe b, AutoX IO a b)) -> AutoXIO a b

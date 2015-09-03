@@ -22,7 +22,7 @@ import Language.Haskell.TH
 import Language.Haskell.TH.Syntax
 import Language.Haskell.TH.Quote
 import Control.Arrow.CCA
-import Control.Arrow hiding ((&&&))
+import Control.Arrow hiding ((&&&),(***),first,second)
 import qualified Control.Category as Q
 import Data.List (mapAccumL,findIndices,elemIndex,(\\),(!!),delete,nub,find)
 import Data.Graph
@@ -122,22 +122,18 @@ buildExp intmap graph goals exps = ifProgress
 
 createConnection :: Int -> [Expression] -> E.Exp -> ArrowExp -> ExpQ
 createConnection 0 [] _ arrowExp = [| $arrowExp |] -- should only be the original req. This doesn't visit literal signaled arrows. No SIDE EFFECTS?
-createConnection _ [] e arrowExp = [| arr (\a -> $(returnQ $ toExp e)) >>> $arrowExp |] -- should only be the original req. This doesn't visit literal signaled arrows. No SIDE EFFECTS?
+--createConnection _ [] e arrowExp = [| arr (\a -> $(returnQ $ toExp e)) >>> $arrowExp |] -- should only be the original req. This doesn't visit literal signaled arrows. No SIDE EFFECTS?
 createConnection _ exps thisExp arrowExp = defaultConnection exps thisExp arrowExp
 
 -- tuplize may break for oddly shaped tuples
 defaultConnection :: [Expression] -> E.Exp -> ArrowExp -> ExpQ
---defaultConnection exps thisExp arrowExp =
-defaultConnection [e1] thisExp arrowExp = [| $(getEE e1)
-     >>> $(fixTuple (getPattern e1) thisExp)
-    >>> $arrowExp |]
-defaultConnection [e1,e2] thisExp arrowExp =
-    --[| $(foldl1 (&:&) (getEE <$> exps))
-    [| $(getEE e1) &&& $(getEE e2)
-    -- >>> arr (\ $(returnQ . toPat $ tuplize $ getPattern <$> exps) -> $(returnQ $ toExp thisExp))
-     >>> $(fixTuple (tuplize $ getPattern <$> [e1,e2]) thisExp)
-    >>> $arrowExp |]
-
+defaultConnection [] thisExp arrowExp = 
+    [| $(fixTuple E.PWildCard thisExp)
+        >>> $arrowExp |]
+defaultConnection exps thisExp arrowExp = 
+    [| $(foldl1 (&:&) (getEE <$> exps))
+         >>> $(fixTuple (tuplize $ getPattern <$> exps) thisExp)
+        >>> $arrowExp |]
 
 (&:&) :: ExpQ -> ExpQ -> ExpQ
 expr1 &:& expr2 = uInfixE expr1 (varE $ mkName "&&&") expr2

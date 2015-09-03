@@ -1,5 +1,6 @@
 flags: {}
 packages:
 - '.'
-extra-deps: [ th-alpha-0.2.0.2, colorize-haskell-1.0.1, categories-1.0.7 ]
+- '../category-syntax'
+extra-deps: [ category-syntax-0.1.0.0, th-alpha-0.2.0.2, colorize-haskell-1.0.1, categories-1.0.7 ]
 resolver: lts-3.0

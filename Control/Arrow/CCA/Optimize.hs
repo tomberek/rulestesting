@@ -163,6 +163,11 @@ instance Eq AExp where
     Associate == Associate = True
     Disassociate == Disassociate = True
     Swap == Swap = True
+    Terminate == Terminate = True
+    Coidl == Coidl = True
+    Coidr == Coidr = True
+    Idl == Idl = True
+    Idr == Idr = True
     _ == _ = False
 
 infixr 1 :>>>
@@ -268,6 +273,8 @@ rules = [
         , ([| \(a,b) -> (a,b)|],Id)
         , ([| \(a,(b,c)) -> (a,(b,c))|],Id)
         , ([| \((a,b),c) -> ((a,b),c)|],Id) -- so far only two levels
+        , ([| \a -> () |],Terminate)
+        , ([| \a -> ((),()) |],Terminate :*** Terminate)
         , ([| \a -> (a,a)|],Diag)
         , ([| \(a,b) -> a|],Fst)
         , ([| arr fst |],Fst)
@@ -307,7 +314,7 @@ norm (AExp e) = normalizeQ e >>= fromAExp >>= arrFixer
 -- as well as the CCA optimizations (perhaps do CCC first, then CCA?) and then finishes by converting all
 -- categorical constructors back into CCA-compatable forms.
 normalizeQ :: AExp -> Q AExp
-normalizeQ input = L.rewriteM (normalizeReifyAlpha normalize) input
+normalizeQ input = Debug.Trace.trace (show input ++ "  <--  starting") $ L.rewriteM (normalizeReifyAlpha normalizeTrace) input
                >>= L.rewriteM (normalizeReifyAlpha normalizeA)
 
 -- | Finds all instances of patterns that match the rule-set and converts Arr's to categorical operators if possible.
@@ -365,7 +372,9 @@ fromAExp (f :&&& g) = infixE (Just (fromAExp f)) [|(&&&)|] (Just (fromAExp g)) -
 -- ====
 -- | Easy way to turn on tracing
 normalizeTrace :: AExp -> AExp
-normalizeTrace e = Debug.Trace.trace (show e) $ normalize e
+normalizeTrace e = let n = normalize e
+                   in if n==e then Debug.Trace.trace (show e ++ "    ===>    *") $ n
+                      else Debug.Trace.trace (show e ++ "    ===>    " ++ show n) $ n
 --normalizeTrace e = normalize e
 
 -- Arrow, CCA, and skew-mondoidal category laws (not yet all of them):
@@ -398,7 +407,6 @@ normalize (Second (ArrM f)) = ArrM ( [|return|] `crossME` f )
 -- | Category
 normalize (f :>>> Id) = f
 normalize (Id :>>> f) = f
-
 normalize (Id :*** f) = Second f
 normalize (f :*** Id) = First f
 normalize (First Id) = Id
@@ -406,11 +414,15 @@ normalize (Second Id) = Id
 normalize (Lft Id) = Id
 
 -- | Terminal
-normalize (f :>>> Terminate) = Terminate
+--normalize (f :>>> Terminate) = Terminate
+--normalize (f :>>> (Terminate :*** Terminate)) = Terminate :*** Terminate
+--normalize (f :>>> (Terminate :&&& Terminate)) = Terminate :&&& Terminate
+
 -- Cartesian
 normalize (Diag :>>> Fst) = Id
 normalize (Diag :>>> Snd) = Id
---normalize (Diag :>>> (f :*** g) ) = f :&&& g
+
+--normalize (Diag :>>> (f :*** g) ) = f :&&& g  -- not sound?
 normalize ((Fst :>>> f) :&&& (Snd :>>> g)) = f :*** g
 normalize ((Snd :>>> f) :&&& (Fst :>>> g)) = g :*** f
 normalize ((f :*** g) :>>> Snd) = Snd :>>> g
@@ -418,6 +430,7 @@ normalize ((f :*** g) :>>> Fst) = Fst :>>> f
 normalize ((f :&&& g) :>>> Snd) = g
 normalize ((f :&&& g) :>>> Fst) = f
 normalize (Fst :&&& Snd) = Id
+normalize (Snd :&&& Fst) = Swap
 normalize (Id :&&& Id) = Diag
 normalize ((f :&&& g) :>>> Swap) = g :&&& f
 normalize (Id :&&& g) = Diag :>>> Second g
@@ -430,17 +443,21 @@ normalize ( First Associate :>>> Associate :>>> Second Associate ) = Associate :
 normalize ( First Swap :>>> Associate :>>> Second Swap) = Associate :>>> Swap :>>> Associate
 normalize ( Second Swap :>>> Associate :>>> First Swap) = Associate :>>> Swap :>>> Associate
 ---}
-
 -- Braided
 normalize (Diag :>>> ArrM f) = ArrM ( [| diagE . $f |])
 normalize (Swap :>>> Swap) = Id
 normalize (Swap :>>> Fst) = Snd
 normalize (Swap :>>> Snd) = Fst
 normalize (Diag :>>> Swap) = Diag
+normalize (Swap :>>> Swap :>>> f) = f
+normalize (Swap :>>> Fst :>>> f) = Snd :>>> f
+normalize (Swap :>>> Snd :>>> f) = Fst :>>> f
+normalize (Diag :>>> Swap :>>> f) = Diag :>>> f
 normalize ((f :*** g) :>>> Swap) = Swap :>>> (g :*** f)  -- bubble Swap to the left
 normalize ((f :*** g) :>>> (h :*** i)) = (f :>>> h) :*** (g :>>> i) -- combine sequential ***
 normalize ((f :&&& g) :>>> (h :*** i)) = (f :>>> h) :&&& (g :>>> i) -- combine &&& followed by ***
 normalize ((h :>>> (f :*** g)) :>>> Swap) = h :>>> Swap :>>> (g :*** f) -- bubble swap to the left
+
 -- Never a problem combining Diag with Arr, no rules have Diag on the right.
 normalize (Diag :>>> Arr f) = Arr ( f `o` diagE)
 
@@ -479,6 +496,7 @@ normalizeA ((f :>>> g) :>>> h) = f :>>> (g :>>> h) -- Added by TOM
 --normalizeA Fst = Arr [|fst|]
 --normalizeA Snd = Arr [|snd|]
 normalizeA f = normalize f
+
 
 -- | Used to take the function produced by normOpt and process a stream.
 -- TODO: explain various arguments, state etc.

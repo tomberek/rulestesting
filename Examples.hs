@@ -72,17 +72,16 @@ line2 = [arrow|
     () <- cup (w,x)
     -}
 
-line3 :: (HasTerminal () a, Symmetric (,) a,HasIdentity () (,) a,Weaken (,) a,Contract (,) a,ArrowCCA a) => a (b,c) (b,c)
-line3 = $(norm [arrow|
+line3a :: (HasTerminal () a, Symmetric (,) a,HasIdentity () (,) a,Weaken (,) a,Contract (,) a,ArrowCCA a) => a (b,c) (c,())
+line3a = [arrow|
     proc (a,b) -> do
         (c,d) <- swap -< (a,b)
-        (e,f) <- (terminate ) *** (terminate ) -< (a,b)
-        (g,h) <- id -< (c,e)
-        swap -< (g,d)
-        |])
-
-line3a :: (HasTerminal () a, Contract (,) a,Symmetric (,) a,HasIdentity () (,) a,Weaken (,) a,ArrowCCA a) => a (c,b) ((),())
-line3a = $(norm [arrow|
+        (e,f) <- terminate *** terminate -< ((),())
+        id -< (c,f)
+        |]
+{-
+line3a :: (HasTerminal () a,Symmetric (,) a,HasIdentity () (,) a,Weaken (,) a,ArrowCCA a) => a (c,b) ((),())
+line3a = [arrow|
     proc (a,b) -> do
         (c,d) <- swap -< (a,b)
         (e,f) <- terminate *** terminate -< ((),())
@@ -100,8 +99,11 @@ line3a = $(norm [arrow|
         id -< (u,v)
         id -< (w,x)
         id -< (m,z)
-    |])
+    |]
 ---}
+
+---}
+{-
 data Bij a b = Bij (a->b) (b->a)
 inverse :: Bij a b -> Bij b a
 inverse (Bij a b) = Bij b a
@@ -134,6 +136,7 @@ type T5 = (T,T4)
 type T6 = (T,T5)
 type T7 = (T,T6)
 type T8 = (T,T7)
+---}
 {-
 step1 :: ArrowCCA a => a T1 T3
 step1 = [arrow|
@@ -210,6 +213,7 @@ example1 = [arrow|
 -}
 
 
+{-
 example4 :: ArrowCCA a => a Int Int
 example4 = [arrow|
      proc n -> do
