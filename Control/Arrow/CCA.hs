@@ -1,12 +1,23 @@
 {-# LANGUAGE FunctionalDependencies #-}
-{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE TypeFamilies               #-}
-{-# LANGUAGE ScopedTypeVariables        #-}
+{- |
+Module      :  Control.Arrow.CCA
+Description :  ArrowDelay
+Copyright   :  (c) 2015 Thomas Bereknyei
+License     :  BSD3
+Maintainer  :  Thomas Bereknyei <tomberek@gmail.com>
+Stability   :  unstable
+Portability :  MultiParamTypeClasses
 
+Originally from CCA package: <https://hackage.haskell.org/package/CCA-0.1.5.2>
+
+Added ArrowEffect in order to model effectful arrows.
+Adding Swap,Id,Dup,Diag for CCC normalization
+-}
 module Control.Arrow.CCA where
 
 import           Control.Arrow
@@ -14,10 +25,7 @@ import           Control.Category         (Category)
 import           Control.Concurrent.Async
 import           Control.Monad.Identity
 import           Language.Haskell.TH
-import Control.Category.Monoidal
-import Control.Category
-import Control.Category.Structural
-import Prelude hiding (fst,snd,(.),id)
+import           Language.Haskell.TH.Syntax(Lift(..))
 
 -- | An @'ArrowCCA'@ is a typeclass that captures causual commutative arrows.
 -- Any instance must also be an instance of 'ArrowLoop'.
@@ -26,10 +34,6 @@ import Prelude hiding (fst,snd,(.),id)
 -- Laws:
 -- `first f >>> second g == second g >>> first f`
 -- `init i *** init j == init (i,j)`
-class Category k => HasTerminal i k | k -> i where
-    terminate :: k a i
-instance HasTerminal () (->) where
-    terminate = const ()
 class ArrowLoop a => ArrowCCA a where
     arr' :: ExpQ -> (b->c) -> a b c
     arr' _ = arr
@@ -46,9 +50,12 @@ class ArrowLoop a => ArrowCCA a where
     arrM' :: ExpQ -> (b -> (M a) c) -> a b c
     arrM' _ = arrM
 
--- | from `arrows` package
-class (Arrow a, Arrow (f a)) => ArrowTransformer f a where
-    liftArrow :: a b c -> f a b c
+class Category k => HasTerminal k where
+                            terminate :: i -> k a i
+                            terminate' :: ExpQ -> i -> k a i
+                            terminate' _ = terminate
+instance HasTerminal (->) where
+    terminate = const
 
 newtype PKleisli a b = PKleisli {runPKleisli :: Kleisli IO a b} deriving (Category,ArrowLoop)
 rr :: PKleisli a b -> a -> IO b

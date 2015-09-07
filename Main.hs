@@ -1,24 +1,71 @@
+{-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE DeriveTraversable #-}
+{-# LANGUAGE DeriveFoldable #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE ImpredicativeTypes #-}
+{-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE QuasiQuotes     #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE AllowAmbiguousTypes #-}
 module Main where
 
-import           Prelude                     hiding (id, (.))
-import           Control.Arrow.CCA.Optimize
+import           Prelude hiding (id,(.))
 import           Examples
-import           Auto
+import           Control.Arrow.TH
+import Language.Haskell.Meta.Utils
+import Language.Haskell.TH
+import Language.Haskell.TH.Utilities
+import Language.Haskell.TH.Syntax
+import Control.Category
+import Control.Categorical.Bifunctor
+import Control.Applicative
+import qualified Language.Haskell.Exts as E
+import Data.Data
+import qualified Control.Lens as L
+import Data.Typeable
+import Control.Arrow(arr)
+
+deriving instance Show NameFlavour
+deriving instance Show NameSpace
+l = [| arr id >>> arr id |] >>= \c -> do
+    let (a,b) = $( [| $(s t)  |] ) c
+    a' <- a
+    b' <- b
+    reportError $ show b'
+    return (a',b')
+
 
 main :: IO ()
 main = do
+    print $ [| id >>> id |] >>= L.rewriteM reifyLaws
+    print $ [| first id >>> id >>> id |] >>= L.rewriteM reifyLaws
+    {-
+    printCCA line1
+    printCCA line2
+    printCCA line3
+    ---}
+    printCCA line4
     --print "Just proc-do desugar:"
     --printCCA example4b
     --print "CCA optimized:"
 
     --printCCA ( $(norm example4b))
-    --putStrLn ""
     --print "Just proc-do desugar:"
-    printCCA line3a
-    print "CCA optimized:"
-    printCCA ( $(norm line3a))
+    
+    --print "CCA optimized:"
+    --printCCA ( $(norm line1))
     --putStrLn ""
     --print "Just proc-do desugar:"
     --printCCA line2

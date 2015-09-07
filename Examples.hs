@@ -9,9 +9,8 @@
 {-# LANGUAGE AllowAmbiguousTypes    #-}
 module Examples where
 import           Control.Arrow.CCA
-import           Control.Arrow.CCA.Optimize
 import           Control.Arrow.TH
-import           Control.Arrow hiding ((&&&),(***))
+import           Control.Arrow hiding ((&&&),(***),first,second)
 import           Control.Concurrent          (threadDelay)
 import Control.Concurrent.Async
 import           Data.Time
@@ -24,20 +23,35 @@ import Control.Category.Monoidal
 import Control.Category.Cartesian
 import Control.Categorical.Bifunctor
 {-
-line1 :: (M a ~ IO,ArrowCCA a) => a (String, String) ()
-line1 = [arrow| proc (n,g) -> do
-    a <- getURLSum -< n
-    d <- getURLSum -< g
-    b <- arr length -< n
-    c <- arrM (\input -> do
-               print input
-               print ":"
-               read <$> getLine) -< n
-    _ <- arrM print -< a + c + d
-    returnA -< ()
-    |]
+line1 :: (Arrow a,Category a,ArrowCCA a) => a b b
+line1 = [arrow| proc g -> do
+            id -< g|]
+
+line2 :: (HasTerminal a,Category a) => a Int ()
+line2 = [arrow| proc g -> id -< () |]
+
+line3 :: (Weaken (,) a,Category a,ArrowCCA a) => a (Int,Int) Int
+line3 = [arrow| proc (x,y) -> do
+            id -< x |]
+---}
+line4 :: (Weaken (,) a,Contract (,) a,Category a,ArrowCCA a) => a (Int,Int) Int
+line4 = [arrow| proc (x,y) -> do
+            z <- arr(*2) -< x+1
+            w <- id -< y
+            id -< z+w
+            |]
+{-
+line5 :: ArrowCCA a => a (Maybe c) c
+line5 = [arrow| proc (Just a) -> id -< a |]
+{-
+line5 :: (Weaken (,) a,Category a) => a (Int,Int) Int
+line5 = [arrow| proc (x,y) -> do
+            z <- id -< x
+            id -< (z,y)
+            |]
 ---}
 
+{-
 processURL :: String -> IO String
 processURL a = do
     getCurrentTime >>= print
@@ -75,9 +89,9 @@ line2 = [arrow|
 line3a :: (HasTerminal () a, Symmetric (,) a,HasIdentity () (,) a,Weaken (,) a,Contract (,) a,ArrowCCA a) => a (b,c) (c,())
 line3a = [arrow|
     proc (a,b) -> do
-        (c,d) <- swap -< (a,b)
-        (e,f) <- terminate *** terminate -< ((),())
-        id -< (c,f)
+        f <- terminate -< a
+        g <- id -< b
+        id -< (g,f)
         |]
 {-
 line3a :: (HasTerminal () a,Symmetric (,) a,HasIdentity () (,) a,Weaken (,) a,ArrowCCA a) => a (c,b) ((),())
@@ -178,7 +192,6 @@ iso = [arrow|
 
     returnA -< t7''
     |]
----}
 data KnotSection a b where
    Line  :: KnotSection a a
    Over  :: KnotSection (a,b) (b,a)
@@ -211,6 +224,7 @@ example1 = [arrow|
         returnA -< a
     |]
 -}
+---}
 
 
 {-

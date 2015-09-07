@@ -22,6 +22,7 @@ module Control.Arrow.CCA.Optimize
     (norm, normOpt, fromAExp, normalize,normalizeTrace,
     runCCNF, nth', runIt,
     pprNorm, pprNormOpt, printCCA, ASyn(..),AExp(..),ArrowCCA(..),(.),id
+    ,reifyAlpha
     --cross, dup, swap, assoc, unassoc, juggle, trace, mirror, untag, tagT, untagT,
     --swapE, dupE
     ) where
@@ -51,259 +52,6 @@ import qualified Debug.Trace
 import Data.Data (Data(..))
 import qualified Data.Generics       as G (everywhere, mkT)
 
--- Internal Representation
--- =======================
-
--- We use AExp to syntactically represent an arrow for normalization purposes.
-data AExp
-  = Arr ExpQ
-  | First AExp
-  | AExp :>>> AExp
-  | ArrM ExpQ -- added to allow arrows with side effects
-  | AExp :*** AExp -- added to prevent premature optimization? or to allow it?
-  | AExp :&&& AExp -- added to prevent premature optimization? or to allow it?
-  | Loop AExp       -- simple loop, needed for rec?
-  | LoopD ExpQ ExpQ -- loop with delayed feedback
-  | Delay ExpQ
-  | Lft AExp -- arrow choice
-  | Lift ExpQ -- arrow lifted
-
-  | ArrFirst ExpQ -- allows for two stages of optimization
-  | ArrSecond ExpQ -- allows for two stages of optimization
-
-  | Id -- This and below added for Symetric Cartesian (not monoidal)
-  -- Cartesian
-  | Diag
-  | Fst
-  | Snd
-  -- Associative (not used much yet)
-  | Associate
-  | Disassociate
-  -- Braided and Symmetric
-  | Swap
-  | Second AExp
-  -- Monoidal
-  | Idr
-  | Idl
-  | Coidl
-  | Coidr
-  | Terminate
-  {- Closed, not needed
-  | Apply -- (f,a) = f a   arr (\(f,a)->f a)
-  | Curry
-  | Uncurry
-  -}
-
-instance L.Plated AExp where
-    plate f (First e) = First <$> f e
-    plate f (Second e) = Second <$> f e
-    plate f (a :>>> b) = (:>>>) <$> f a <*> f b
-    plate f (a :*** b) = (:***) <$> f a <*> f b
-    plate f (a :&&& b) = (:&&&) <$> f a <*> f b
-    plate f (Loop e) = Loop <$> f e
-    plate f (Lft e) = Lft <$> f e
-    plate _ e = pure e
-
-areExpAEq' :: Q Exp -> Q Exp -> Q Bool
-areExpAEq' f g = do
-    f' <- liftM fixity f
-    g' <- liftM fixity g
-    case f' of
-        UInfixE {} -> return False
-        _ -> case g' of
-             UInfixE {} -> return False
-             _ -> expEqual f' g'
-
-fixity :: Data a => a -> a
-fixity = G.everywhere (G.mkT expf)
-    where expf (UInfixE l op r) = InfixE (Just l) op (Just r)
-          expf e = e
-
--- | Used to measure progress for normalization using rewriteM
-eqM :: AExp -> AExp -> Q Bool
-eqM (Arr f) (Arr g) = areExpAEq' f g
-eqM (ArrFirst f) (ArrFirst g) = areExpAEq' f g
-eqM (ArrSecond f) (ArrSecond g) = areExpAEq' f g
-eqM (First f) (First g) = eqM f g
-eqM (Second f) (Second g) = eqM f g
-eqM (f :>>> g) (h :>>> i) = (&&) <$> eqM f h <*> eqM g i
-eqM (ArrM f) (ArrM g) = areExpAEq' f g
-eqM (f :*** g) (h :*** i) = (&&) <$> eqM f h <*> eqM g i
-eqM (f :&&& g) (h :&&& i) = (&&) <$> eqM f h <*> eqM g i
-eqM (Loop f) (Loop g) = eqM f g
-eqM (LoopD f g) (LoopD h i) = (&&) <$> areExpAEq' f h <*> areExpAEq' g i
-eqM (Delay f) (Delay g) = areExpAEq' f g
-eqM (Lft f) (Lft g) = eqM f g
-eqM Id Id = return True
-eqM Diag Diag = return True
-eqM Fst Fst = return True
-eqM Snd Snd = return True
-eqM (Lift f) (Lift g) = areExpAEq' f g
-eqM Associate Associate = return True
-eqM Disassociate Disassociate = return True
-eqM Swap Swap = return True
-eqM Coidl Coidl = return True
-eqM Coidr Coidr = return True
-eqM Idr Idr = return True
-eqM Idl Idl = return True
-eqM Terminate Terminate = return True
-eqM _ _ = return False
-
-instance Eq AExp where
-    First f == First g = f==g
-    Second f == Second g = f==g
-    (f :>>> g) == (h :>>> i) = f == h && g == i
-    (f :*** g) == (h :*** i) = f == h && g == i
-    (f :&&& g) == (h :&&& i) = f == h && g == i
-    (Loop f) == (Loop g) = f == g
-    Id == Id = True
-    Diag == Diag = True
-    Fst == Fst = True
-    Snd == Snd = True
-    Associate == Associate = True
-    Disassociate == Disassociate = True
-    Swap == Swap = True
-    Terminate == Terminate = True
-    Coidl == Coidl = True
-    Coidr == Coidr = True
-    Idl == Idl = True
-    Idr == Idr = True
-    _ == _ = False
-
-infixr 1 :>>>
-infixr 3 :***
-infixr 3 :&&&
-
-instance Show AExp where
-    show Id = "Id"
-    show Diag = "Diag"
-    show Swap = "Swap"
-    show Fst = "Fst"
-    show Snd = "Snd"
-    show Coidl = "Coidl"
-    show Coidr = "Coidr"
-    show Idr = "Idr"
-    show Idl = "Idl"
-    show Associate = "Associate"
-    show Disassociate = "Disassociate"
-    show (Arr _) = "Arr"
-    show (First f) = "First " ++ show f
-    show (Second f) = "Second " ++ show f
-    show (ArrFirst _) = "ArrFirst"
-    show (ArrSecond _) = "ArrSecond"
-    show (ArrM _) = "ArrM"
-    show (f :>>> g) = "(" ++ show f ++ " >>> " ++ show g ++ ")"
-    show (f :*** g) = "[" ++ show f ++ " *** " ++ show g ++ "]"
-    show (f :&&& g) = "[" ++ show f ++ " &&& " ++ show g ++ "]"
-    show (Loop f) = "Loop " ++ show f
-    show (LoopD _ _) = "LoopD"
-    show (Delay _) = "Delay"
-    show (Lft _) = "Lft"
-    show (Lift _) = "Lift"
-    show (Terminate) = "Terminate"
-instance Show (ASyn m a b) where
-    show (AExp x) = show x
-
--- We use phantom types to make ASyn an Arrow.
-newtype ASyn (m :: * -> *) b c = AExp AExp
-
-instance Category (ASyn m) where
-    id = AExp Id
-    AExp g . AExp f = AExp (f :>>> g)
-instance QFunctor p (ASyn m) where
-    second (AExp f) = AExp (Second f)
-instance PFunctor p (ASyn m) where
-    first (AExp f) = AExp (First f)
-instance Bifunctor p (ASyn m) where
-    AExp f *** AExp g = AExp $ f :*** g
-instance Contract p (ASyn m) where
-    AExp f &&& AExp g = AExp $ f :&&& g
-instance HasLeftIdentity () p (ASyn m) where
-    coidl = AExp Coidl
-    idl = AExp Idl
-instance HasRightIdentity () p (ASyn m) where
-    coidr = AExp Coidr
-    idr = AExp Idr
-instance HasIdentity () (,) (ASyn m)
-instance HasTerminal () (ASyn m) where
-    terminate = AExp Terminate
-instance Weaken p (ASyn m) where
-    fst = AExp Fst
-    snd = AExp Snd
-instance Symmetric p (ASyn m) where
-    swap = AExp Swap
-instance Arrow (ASyn m) where
-    arr _ = error "ASyn arr not implemented"
-    first (AExp f) = AExp (First f)
-    second (AExp f) = AExp (Second f)
-    (AExp f) *** (AExp g) = AExp (f :*** g)
-    (AExp f) &&& (AExp g) = AExp (f :&&& g)
-instance ArrowLoop (ASyn m) where
-    loop (AExp f) = AExp (Loop f)
-instance ArrowCCA (ASyn m) where
-    arr' f _ = AExp (Arr f)
-    delay _ = error "ASyn delay not implemented"
-    delay' f _ = AExp (Delay f)
-    type M (ASyn m) = m  -- Not in original CCA. 2015-TB
-    arrM' f _ = AExp (ArrM f)
-    arrM _ = error "ASyn arrM not implemented"
---ArrowChoice only requires definition for 'left', but the default implementation
---for 'right' and '|||' uses arr so we need to redefine them using arr' here.
---'+++' is also redefined here for completeness.
-instance Monad m => ArrowChoice (ASyn m) where
-    left (AExp f) = AExp (Lft f)
-    right f = arr' [| mirror |] mirror >>> left f >>> arr' [| mirror |] mirror
-    f +++ g = left f >>> right g
-    f ||| g = f +++ g >>> arr' [| untag |] untag
-
--- Pretty printing AExp.
-printCCA :: ASyn m t t1 -> IO ()
-printCCA (AExp x) = runQ (fromAExp x) >>= putStrLn . simplify . pprint
-
--- Normalization
--- =============
--- Captures the expressions (using th-alpha's notion of equivalence) for
--- conversion into categorical terms.
-rules :: [(ExpQ, AExp)]
-rules = [
-        ([| \a -> a |],Id)
-        , ([| arr id |],Id)
-        , ([| returnA |],Id)
-        , ([| id |],Id)
-        , ([| \(a,b) -> (a,b)|],Id)
-        , ([| \(a,(b,c)) -> (a,(b,c))|],Id)
-        , ([| \((a,b),c) -> ((a,b),c)|],Id) -- so far only two levels
-        , ([| \a -> () |],Terminate)
-        , ([| \a -> ((),()) |],Terminate :*** Terminate)
-        , ([| \a -> (a,a)|],Diag)
-        , ([| \(a,b) -> a|],Fst)
-        , ([| arr fst |],Fst)
-        , ([| \(a,b) -> b|],Snd)
-        , ([| arr snd |],Snd)
-        , ([| \(a,b) -> (b,a)|],Swap)
-        , ([| arr swap |],Swap)
-        , ([| arr (\(a,b) -> (b,a))|],Swap)
-        , ([| \(a,(b,c)) -> ((a,b),c)|],Disassociate)
-        , ([| \((a,b),c) -> (a,(b,c))|],Associate) -- so far only first levels
-        -- experimental. can this be automated?
-        , ([| \(a,b) -> (a,a) |],Fst :>>> Diag)
-        , ([| \(a,b) -> (b,b) |],Snd :>>> Diag)
-        , ([| \((a,b),(c,d)) -> (a,c) |],Fst :*** Fst)
-        , ([| \((a,b),(c,d)) -> (a,d) |],Fst :*** Snd)
-        , ([| \((a,b),(c,d)) -> (b,c) |],Snd :*** Fst)
-        , ([| \((a,b),(c,d)) -> (b,d) |],Snd :*** Snd)
-        , ([| \((a,b),(c,d)) -> (c,a) |],Fst :*** Fst :>>> Swap)
-        , ([| \((a,b),(c,d)) -> (d,a) |],Fst :*** Snd :>>> Swap)
-        , ([| \((a,b),(c,d)) -> (c,b) |],Snd :*** Fst :>>> Swap)
-        , ([| \((a,b),(c,d)) -> (d,b) |],Snd :*** Snd :>>> Swap)
-        ]
-
--- | Monadic Find, coppied from another library (sorry, forgot which)
-findM :: Monad m => (a -> m (Maybe t)) -> [a] -> m (Maybe t)
-findM f = foldr test (return Nothing)
-    where test x m = do
-              curr <- f x
-              maybe m (const $ return curr) curr
 
 -- | norm is a TH function that normalizes a given CCA, e.g., $(norm e) will
 -- give the CCNF of e.
@@ -335,39 +83,6 @@ normOpt (AExp e) = do
       --g -> [| ( (), $(fromAExp g) ) |] -- perhaps just expose best effort function?
       g -> error $ "Perhaps not causual? Can't optimize past: " ++ show g
 
--- | fromAExp converts AExp back to TH Exp structure.
-fromAExp :: AExp -> ExpQ
-
-fromAExp Id = [|id|] -- Categorical constructors should not be around after second stage
-fromAExp Diag = [| diag |]
-fromAExp Fst = [| fst |]
-fromAExp Snd = [| snd |]
-fromAExp Associate = [| arr (\((a,b),c)->(a,(b,c))) |]
-fromAExp Disassociate = [| arr (\(a,(b,c))->((a,b),c)) |]
-fromAExp Swap = [| swap |]
-fromAExp Coidr = [| coidr |]
-fromAExp Coidl = [| coidl |]
-fromAExp Idl = [| idl |]
-fromAExp Idr = [| idr |]
-fromAExp Terminate = [| terminate |]
-
--- Should not be arround after second rewrite pass:
-fromAExp (ArrFirst f) = appE [|arr|] f
-fromAExp (ArrSecond f) = appE [|arr|] f
-
-fromAExp (Arr f) = appE [|arr|] f
-fromAExp (First f) = appE [|first|] (fromAExp f)
-fromAExp (Second f) = appE [|second|] (fromAExp f)
-fromAExp (f :>>> g) = infixE (Just (fromAExp f)) [|(>>>)|] (Just (fromAExp g))
-fromAExp (Loop f) = appE [|loop|] (fromAExp f)
-fromAExp (LoopD i f) = appE (appE [|loopD|] i) f
-fromAExp (ArrM i) = appE [|arrM|] i
-fromAExp (Delay i) = appE [|delay|] i
-fromAExp (Lft f) = appE [|left|] (fromAExp f)
-fromAExp (Lift f) = f
-fromAExp (f :*** g) = infixE (Just (fromAExp f)) [|(***)|] (Just (fromAExp g)) -- Not in original CCA. 2015-TB
-fromAExp (f :&&& g) = infixE (Just (fromAExp f)) [|(&&&)|] (Just (fromAExp g)) -- Not in original CCA. 2015-TB
-
 -- CCNF
 -- ====
 -- | Easy way to turn on tracing
@@ -379,30 +94,6 @@ normalizeTrace e = let n = normalize e
 
 -- Arrow, CCA, and skew-mondoidal category laws (not yet all of them):
 normalize :: AExp -> AExp
-normalize (Arr f :>>> Arr g) = Arr (g `o` f)
-normalize (First (Arr f)) = ArrFirst f
-normalize (Second (Arr f)) = ArrSecond f
-
-normalize (Arr f :>>> LoopD i g) = LoopD i (g `o` (f `crossE` idE))
-normalize (LoopD i f :>>> Arr g) = LoopD i ((g `crossE` idE) `o` f)
-normalize (LoopD i f :>>> LoopD j g) = LoopD (tupE [i,j])
-  (assocE `o` juggleE `o` (g `crossE` idE) `o` juggleE `o` (f `crossE` idE) `o` assocE')
-normalize (Loop (LoopD i f)) = LoopD i (traceE (juggleE `o` f `o` juggleE))
-normalize (First (LoopD i f)) = LoopD i (juggleE `o` (f `crossE` idE) `o` juggleE)
-normalize (Delay i) = LoopD i swapE
--- Choice:
-normalize (Lft (Arr f)) = Arr (lftE f)
-normalize (Lft (LoopD i f)) = LoopD i (untagE `o` lftE f `o` tagE)
-
-normalize (Loop (Arr f)) = Arr (traceE f) -- Not in original CCA. 2015-TB Added by TOM: for rec?
-normalize (Loop (ArrM f)) = ArrM (traceE f) -- Not in original CCA. 2015-TB Added by TOM: for rec?
-
--- Laws for effectful ArrM's
-normalize (Arr f :>>> ArrM g) = ArrM [| $g . $f |]
-normalize (ArrM f :>>> Arr g) = ArrM [| liftM $g . $f |]
-normalize (First (ArrM f)) = ArrM ( f `crossME` [|return|] )
-normalize (Second (ArrM f)) = ArrM ( [|return|] `crossME` f )
---normalize (LoopD i f :>>> ArrM g) = LoopD i ((g `crossME` [|return|]) `o` f) --TODO: check this, perhaps need a LoopDM?
 
 -- | Category
 normalize (f :>>> Id) = f
@@ -422,20 +113,24 @@ normalize (Lft Id) = Id
 normalize (Diag :>>> Fst) = Id
 normalize (Diag :>>> Snd) = Id
 
---normalize (Diag :>>> (f :*** g) ) = f :&&& g  -- not sound?
+normalize (Diag :>>> (f :*** g) ) = f :&&& g  -- not sound?
 normalize ((Fst :>>> f) :&&& (Snd :>>> g)) = f :*** g
 normalize ((Snd :>>> f) :&&& (Fst :>>> g)) = g :*** f
 normalize ((f :*** g) :>>> Snd) = Snd :>>> g
 normalize ((f :*** g) :>>> Fst) = Fst :>>> f
 normalize ((f :&&& g) :>>> Snd) = g
 normalize ((f :&&& g) :>>> Fst) = f
-normalize (Fst :&&& Snd) = Id
-normalize (Snd :&&& Fst) = Swap
+normalize (Fst :&&& Snd) = Id :*** Id
+normalize (Snd :&&& Fst) = Swap :>>> Id :*** Id
+normalize ((Fst :>>> f) :&&& Snd) = f :*** Id
+normalize ((Snd :>>> f) :&&& Fst) = Swap :>>> f :*** Id
+normalize (Fst :&&& (Snd :>>> f)) = Id :*** f
+normalize (Snd :&&& (Fst :>>> f)) = Swap :>>> Id :*** f
 normalize (Id :&&& Id) = Diag
 normalize ((f :&&& g) :>>> Swap) = g :&&& f
 normalize (Id :&&& g) = Diag :>>> Second g
 normalize (f :&&& Id) = Diag :>>> First f
-normalize ((Diag :>>> f) :&&& (Diag :>>> g)) = Diag :>>> (f :*** g)
+normalize ((Diag :>>> f) :&&& (Diag :>>> g)) = Diag :>>> (f :&&& g)
 
 -- | Associative. Probably not handy yet
 {-normalize ( Second Disassociate :>>> Disassociate :>>> First Disassociate ) = Disassociate :>>> Disassociate
@@ -461,22 +156,41 @@ normalize ((h :>>> (f :*** g)) :>>> Swap) = h :>>> Swap :>>> (g :*** f) -- bubbl
 -- Never a problem combining Diag with Arr, no rules have Diag on the right.
 normalize (Diag :>>> Arr f) = Arr ( f `o` diagE)
 
-normalize ((Diag :>>> ArrFirst f) :>>> Swap) = Diag :>>> ArrSecond f
-normalize ((Diag :>>> ArrSecond f) :>>> Swap) = Diag :>>> ArrFirst f
 normalize ((Diag :>>> First f) :>>> Swap) = Diag :>>> Second f
 normalize ((Diag :>>> Second f) :>>> Swap) = Diag :>>> First f
-normalize (ArrFirst f :>>> Swap) = ArrSecond f
-normalize (ArrSecond f :>>> Swap) = ArrFirst f
-normalize (First f :>>> Swap) = Second f
-normalize (Second f :>>> Swap) = First f
+normalize (First f :>>> Swap) = Swap :>>> Second f
+normalize (Second f :>>> Swap) = Swap :>>> First f
 
 -- Association of >>>. Not sure if needed or helpful.
 normalize (f :>>> (g :>>> h)) = (f :>>> g) :>>> h -- Added by TOM
 normalize ((f :>>> g) :>>> h) = (f :>>> g) :>>> h -- Added by TOM
 normalize e = e
 
--- | Round 2 to remove residual Arr's from first/second usage
+-- | Round 2 is CCA and assoc in other direction
 normalizeA :: AExp -> AExp
+-- | CCA
+normalizeA (Arr f :>>> Arr g) = Arr (g `o` f)
+normalizeA (Arr f :>>> LoopD i g) = LoopD i (g `o` (f `crossE` idE))
+normalizeA (LoopD i f :>>> Arr g) = LoopD i ((g `crossE` idE) `o` f)
+normalizeA (LoopD i f :>>> LoopD j g) = LoopD (tupE [i,j])
+  (assocE `o` juggleE `o` (g `crossE` idE) `o` juggleE `o` (f `crossE` idE) `o` assocE')
+normalizeA (Loop (LoopD i f)) = LoopD i (traceE (juggleE `o` f `o` juggleE))
+normalizeA (First (LoopD i f)) = LoopD i (juggleE `o` (f `crossE` idE) `o` juggleE)
+normalizeA (Delay i) = LoopD i swapE
+-- Choice:
+normalizeA (Lft (Arr f)) = Arr (lftE f)
+normalizeA (Lft (LoopD i f)) = LoopD i (untagE `o` lftE f `o` tagE)
+
+normalizeA (Loop (Arr f)) = Arr (traceE f) -- Not in original CCA. 2015-TB Added by TOM: for rec?
+normalizeA (Loop (ArrM f)) = ArrM (traceE f) -- Not in original CCA. 2015-TB Added by TOM: for rec?
+
+-- Laws for effectful ArrM's
+normalizeA (Arr f :>>> ArrM g) = ArrM [| $g . $f |]
+normalizeA (ArrM f :>>> Arr g) = ArrM [| liftM $g . $f |]
+normalizeA (First (ArrM f)) = ArrM ( f `crossME` [|return|] )
+normalizeA (Second (ArrM f)) = ArrM ( [|return|] `crossME` f )
+--normalize (LoopD i f :>>> ArrM g) = LoopD i ((g `crossME` [|return|]) `o` f) --TODO: check this, perhaps need a LoopDM?
+
 -- | ASSUMPTION: We presume that pure actions are fairly cheap to perform, thus not much to gain by *** or &&&
 normalizeA (Arr f :*** Arr g) = Arr $ f `crossE` g
 normalizeA (ArrM f :*** Arr g) = ArrM $ f `crossME` [| return . $g |]
@@ -486,10 +200,9 @@ normalizeA (Arr f :*** ArrM g) = ArrM $ [| return . $f |]  `crossME` g
 normalizeA (Arr f :&&& Arr g) = Arr $ (f `crossE` g) `o` diagE
 normalizeA (ArrM f :&&& Arr g) = ArrM $ (f `crossME` [| return . $g |]) `o` diagE
 normalizeA (Arr f :&&& ArrM g) = ArrM $ ([| return . $f |]  `crossME` g) `o` diagE
-normalizeA (ArrFirst f) = Arr (f `crossE` idE)
-normalizeA (ArrSecond f) = Arr (idE `crossE` f)
 normalizeA (f :>>> (g :>>> h)) = f :>>> (g :>>> h) -- Added by TOM
 normalizeA ((f :>>> g) :>>> h) = f :>>> (g :>>> h) -- Added by TOM
+
 --normalizeA Id = Arr idE
 --normalizeA Diag = Arr diagE
 --normalizeA Swap = Arr swapE
@@ -551,12 +264,6 @@ cross = bimap
 crossM :: Applicative m => (t -> m t2) -> (t1 -> m t3) -> (t, t1) -> m (t2,t3)
 crossM f g =uncurry (liftA2 (,)) . bimap f g
 
-mirror :: Either b a -> Either a b
-mirror (Left x) = Right x
-mirror (Right y) = Left y
-untag :: Either t t -> t
-untag (Left x) = x
-untag (Right y) = y
 lft :: (t -> a) -> Either t b -> Either a b
 lft f x = case x of
   Left  u -> Left (f u)
@@ -602,13 +309,6 @@ pprNormOpt :: ASyn m a b -> Q Exp
 pprNormOpt = ppr' . normOpt
 ppr' :: Q Exp -> Q Exp
 ppr' e = runQ (fmap toLet e) >>= litE . StringL . simplify . pprint
-
-simplify :: String -> String
-simplify = unwords . map (unwords . map aux . words) . lines
-  where aux (c:x) | not (isAlpha c) = c : aux x
-        aux x = let (_, v) = break (=='.') x
-                in if length v > 1 then aux (tail v)
-                                   else x
 
 -- To Let-Expression
 -- =================
