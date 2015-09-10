@@ -20,7 +20,7 @@ Stability   :  unstable
 Portability :  TemplateHaskell,QuasiQuotes,ViewPatterns
 
 -}
-module Control.Arrow.TH (arrow,printCCA,reifyNames,reifyLaws,s,t) where
+module Control.Arrow.TH (arrow,printCCA,reifyNames,reifyLaws,cca_laws,into,buildA, cleanNames,parseMode) where
 import qualified Language.Haskell.Exts as E
 import Control.Category
 import Language.Haskell.Meta
@@ -59,6 +59,7 @@ import Control.Monad(liftM,(>=>),(>>))
 import Data.Data (Data(..))
 import qualified Data.Generics       as G (everywhere, mkT)
 import           Data.Char           (isAlpha)
+import Control.CCA.Normalize
 
 type ArrowExp = ExpQ
 data NodeE =
@@ -84,7 +85,6 @@ reifyAlpha' ruleSet e = do
 reifyNames :: Exp -> Q (Maybe Exp)
 reifyNames (VarE (Name occname NameS)) = return Nothing
 reifyNames (VarE (Name occname _)) = return $ Just $ VarE (Name occname NameS)
-reifyNames _ = return Nothing
 
 --test (const (3::Int) -> s@(const "hi" -> t)) = _
 
@@ -94,6 +94,8 @@ reifyLaws' =
         [rule| id *** id |]  -> into' [|| id ||]
         e -> return Nothing -- >> reportWarning (show e)
 
+
+
 into' :: Q (TExp a) -> Q (Maybe (TExp a))
 into' b = Just <$> b
 
@@ -101,43 +103,39 @@ reifyLaws :: Exp -> Q (Maybe Exp)
 reifyLaws =
     \case
         [rule| id >>> id |]  -> into [| id |]
-        [rule| id >>> _x_ |] -> into [| $_x_ |]
-        [rule| _x_ >>> id |] -> into [| $_x_ |]
-        [rule| (\_x_ -> _y_) _z_ |] | __x__ == __y__ -> into [| $_z_ |]
+        [rule| id >>> x |]  -> into [| $x |]
+        [rule| x >>> id |] -> into [| $x |]
+        [rule| x &&& y |] | x_ == y_ -> into [| $x >>> diag |]
         [rule| first id |]   -> into [| id |]
-
-        [rule| arr (\_x_ -> _y_) |] | __x__ == __y__ -> into [| id |]
-        [rule| arr (\(_x_,_z_) -> _y_) |] | __x__ == __y__ -> into [| fst |]
-        [rule| arr (\(_x_,_z_) -> _y_) |] | __z__ == __y__ -> into [| snd |]
-        [rule| arr (\_x_ -> (_y_,_z_)) |] | __x__ == __y__ && __x__ == __z__ -> into [| diag |]
-        [rule| _f_ >>> (_g_ >>> _h_) |]  -> into [| ($_f_ >>> $_g_) >>> $_h_ |]
-        e -> reportWarning (show e) >> return Nothing
+        [rule| arr (\x -> y) |] | y_ == y_ -> into [| id |]
+{-
+          [rule| arr (\(x_,z_) -> y_) |] | x__ == y__ -> into [| fst |]
+          [rule| arr (\(x_,z_) -> y_) |] | z__ == y__ -> into [| snd |]
+          [rule| arr (\x_ -> (y_,z_)) |] | x__ == y__ && x__ == z__ -> into [| diag |]
+          [rule| f_ >>> (g_ >>> h_) |]  -> into [| ($f_ >>> $g_) >>> $h_ |]
+-}
+        e -> return Nothing
 
 reifyLawsRight =
     \case
-        [rule| arr _f_ >>> arr _g_ |]  -> into [| arr ($_g_ . $_f_) |]
-        [rule| (_f_ >>> _g_) >>> _h_ |]  -> into [| $_f_ >>> ($_g_ >>> $_h_) |]
-        [rule| _f_ >>> (_g_ >>> _h_) |]  -> return Nothing
-        e -> reifyLaws e
+    {-
+          [rule| arr f_ >>> arr g_ |]  -> into [| arr ($g_ . $f_) |]
+          [rule| (f_ >>> g_) >>> h_ |]  -> into [| $f_ >>> ($g_ >>> $h_) |]
+          [rule| f_ >>> (g_ >>> h_) |]  -> return Nothing
+    -}
+          e -> reifyLaws e
 s :: Q [Match] -> Q Exp
 s a = do
     as <- a
     return $ LamCaseE as
 
-t :: Q [Match]
-t = extractRules [| \case
-                     $([rule| arr f_ >>> arr g_ |]) -> f_ |]
+cca_laws =  \case
+          [rule| arr f >>> arr g |] -> into [| arr ($g . $f) |]
+          [rule| fst |] -> into [| arr fst |]
+          _ -> return Nothing
 
-
-extract = mapM extractRules' . extractRules
-extractRules a = do
-    LamCaseE a' <- a
-    return a'
-extractRules' a = do
-    Match b c d <- a
-    return (b,c,d)
-
-
+cca [rule| arr f >>> arr g |] = [| arr ( $g . $f) |]
+cca [rule| x &&& y |] | x_ == y_ = [| $x >>> diag |]
 into :: ExpQ -> Q (Maybe Exp)
 into b = Just <$> b
 
@@ -152,21 +150,48 @@ ruleSet = [
 -- CCA optimization via `arr'` and `delay'` usage.
 arrow :: QuasiQuoter
 arrow = QuasiQuoter {
-    quoteExp = \input -> case E.parseExpWithMode E.defaultParseMode{E.extensions=[E.EnableExtension E.Arrows],E.fixities=Just (E.baseFixities)} input of
-        E.ParseOk result -> do
-            res <- buildA result
-            --res2 <- L.rewriteM (reifyAlpha' ruleSet) res
-            --reportWarning $ show res
-            res3 <- L.rewriteM (reifyLaws) res
-            res4 <- L.rewriteM (reifyLawsRight) res
-            res5 <- L.rewriteM (reifyNames) res4
-            --reportWarning $ show res4
-            arrFixer res5
-        E.ParseFailed l err -> error $ "arrow QuasiQuoter: " ++ show l ++ " " ++ show err
-      , quotePat = error "cannot be patterns."
-      , quoteDec = error "cannot be declarations."
-      , quoteType = error "cannot be types."
-        }
+  quoteExp = \input -> case E.parseExpWithMode parseMode input of
+      E.ParseOk result -> do
+          res <- buildA result
+          --res2 <- L.rewriteM (reifyAlpha' ruleSet) res
+          --reportWarning $ show res
+          res3 <- L.rewriteM (reifyLaws) res
+          res4 <- L.rewriteM (reifyLawsRight) res
+          res5 <- return $ cleanNames res4 -- L.rewriteM (reifyNames) res4
+          --reportWarning $ show res4
+          arrFixer res5
+      E.ParseFailed l err -> error $ "arrow QuasiQuoter: " ++ show l ++ " " ++ show err
+  , quotePat = error "cannot be patterns."
+  , quoteDec = \input -> case E.parseDeclWithMode parseMode input of
+      E.ParseOk result -> undefined
+      E.ParseFailed l err -> error $ "arrow QuasiQuoter in Decl: " ++ show l ++ " " ++ show err
+  , quoteType = error "cannot be types."
+    }
+parseMode = E.defaultParseMode{E.extensions=[E.EnableExtension E.Arrows],E.fixities=Just (E.baseFixities)}
+
+-- | A 'QuasiQuoter' that desugars proc-do notation and prepares for
+-- CCA optimization via `arr'` and `delay'` usage.
+arrow2 :: QuasiQuoter
+arrow2 = QuasiQuoter {
+  quoteExp = \input -> case E.parseExpWithMode parseMode input of
+      E.ParseOk result -> do
+          res <- buildA result
+          --res2 <- L.rewriteM (reifyAlpha' ruleSet) res
+          --reportWarning $ show res
+          res2 <- undefined -- dataToTExpQ (const Nothing _) _
+          --reportWarning $ show res4
+          arrFixer res2
+      E.ParseFailed l err -> error $ "arrow QuasiQuoter: " ++ show l ++ " " ++ show err
+  , quotePat = error "cannot be patterns."
+  , quoteDec = \input -> case E.parseDeclWithMode parseMode input of
+      E.ParseOk result -> undefined
+      E.ParseFailed l err -> error $ "arrow QuasiQuoter in Decl: " ++ show l ++ " " ++ show err
+  , quoteType = error "cannot be types."
+    }
+    where parseMode = E.defaultParseMode{E.extensions=[E.EnableExtension E.Arrows],E.fixities=Just (E.baseFixities)}
+
+
+
 
 -- | Replaces expressions of `arr`, `arrM`, `delay`, and `returnA` with
 -- the versions that have their arguments lifted to TH.

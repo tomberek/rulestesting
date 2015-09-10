@@ -1,3 +1,6 @@
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE CPP #-}
@@ -12,25 +15,23 @@ module Language.Haskell.TH.Utilities(
     tuple, tupleP, tuplizer,
     times,
     hsQuote, hsSplice, quoteArr, quoteInit,     -- for CCA
-    rule,promote,promote',ifM,areExpAEq,expEqual --for id detection
+    rule,rule2,promote,promote',ifM,areExpAEq,expEqual --for id detection
+    ,dataToTExpQ
 ) where
 
-import           Data.Generics                (everywhere, mkT)
+import           Data.Generics
 import           Data.List
+import           Data.Char (isLower)
 import           Language.Haskell.Exts.Syntax
 import qualified Language.Haskell.TH as TH
 import qualified Language.Haskell.TH.Quote as TH
 import qualified Language.Haskell.TH.Syntax as TH
 import           Language.Haskell.TH.Alpha
+import qualified Control.Lens as L
+import qualified Data.Data.Lens as L
 import Language.Haskell.Meta
+import Language.Haskell.Meta.Utils
 import Control.Applicative
-
-{-
-tuplize :: [Pat] -> Pat
-tuplize [] = PWildCard
-tuplize [s] =s
-tuplize (s:ss) = PTuple Boxed [s, tuplize ss]
--}
 
 tuplizer :: a -> ([a]->a) -> [a] -> a
 tuplizer u _ [] = u
@@ -44,54 +45,112 @@ ifM b t f = do b' <- b; if b' then t else f
 promote :: TH.Pat -> TH.Exp
 promote (TH.ConP _ [pat]) = promote pat
 promote (TH.ConP _ pats) = TH.TupE $ map promote pats
---promote (TH.VarP (Name s@['_',_,'_']))) = TH.VarE _
 promote (TH.VarP n) = TH.VarE n
 promote (TH.LitP n) = TH.LitE n
 promote (TH.TupP pats) = TH.TupE $ map promote pats
 promote (TH.ParensP pat) = TH.ParensE $ promote pat
 promote (TH.ListP pats) = TH.ListE $ map promote pats
 promote (TH.WildP) = TH.TupE []
-promote x = error $ "pattern promotion TODO" ++ show x
+promote x = error $ "pattern promotion not supported for: " ++ show x
 
 -- | Does not support qualified names or other module matching, only NameS dynamically matched names
+-- so we capture everything dynamically. WARNING, UNSAFE!
 promoteName :: TH.Name -> TH.PatQ
-promoteName (Name s) = [p| TH.Name (TH.OccName $(TH.litP $ TH.stringL s)) |] >>= return .
-                    \case TH.ConP a b -> TH.ConP a (b ++ [TH.WildP])
-                         -- NOTE: Is there a better way to do this? TH.WildP and $TH.WildP does not work
+promoteName (Name s) = [p| TH.Name (TH.OccName $(TH.litP $ TH.stringL s)) _ |] -- >>= return .
 
 -- | Of single Var
 promotePat :: TH.Pat -> TH.PatQ
 promotePat (TH.TupP ps) = [p| TH.TupP $(TH.ListP <$> mapM promotePat ps) |] -- >>= return . error . show
-promotePat (TH.VarP (Name s@['_',t,'_'])) =
+promotePat (TH.VarP (Name s@[t,'_'])) =
     [p| (promote -> $( [p| (TH.returnQ -> $(TH.varP $ Name s)) |]
-        >>= return . TH.AsP (Name $ "_" ++ s ++ "_"))) |]
-    >>= return. TH.AsP (Name $ "_'" ++ [t] ++ "_")
+        >>= return . TH.AsP (Name $ s ++ "_"))) |]
+    >>= return. TH.AsP (Name $ [t] ++ "'_")
 
 promote' :: TH.Exp -> TH.PatQ
-promote' (TH.VarE (Name s@['_',_,'_'])) = [p| (TH.returnQ -> $(TH.varP $ Name s)) |] >>= return . TH.AsP (Name ("_" ++ s ++ "_"))
+promote' (TH.VarE (Name s@[_,'_'])) = [p| (TH.returnQ -> $(TH.varP $ Name s)) |] >>= return . TH.AsP (Name ( s ++ "_"))
+promote' (TH.InfixE (Just e1) o (Just e2)) = [p| TH.UInfixE $(promote' e1) $(promote' o) $(promote' e2) |]
+promote' (TH.UInfixE e1 o e2) = [p| TH.InfixE (Just $(promote' e1)) $(promote' o) (Just $(promote' e2)) |]
+promote' (TH.LamE ps e) = [p| TH.LamE $(TH.ListP <$> mapM promotePat ps) $(promote' e)|] -- >>= return . error . show
+promote' (TH.ParensE e) = promote' e -- parseExp produces an extra parens on a lambda
 promote' (TH.VarE n) = [p| TH.VarE $(promoteName n) |]
 promote' (TH.AppE n e) = [p| TH.AppE $(promote' n) $(promote' e) |]
 promote' (TH.TupE es) = [p| TH.TupE $(TH.ListP <$> mapM promote' es) |]
-promote' (TH.InfixE (Just e1) o (Just e2)) = [p| TH.UInfixE $(promote' e1) $(promote' o) $(promote' e2) |]
-promote' (TH.UInfixE e1 o e2) = [p| TH.InfixE (Just $(promote' e1)) $(promote' o) (Just $(promote' e2)) |]
-promote' (TH.ParensE e) = promote' e -- parseExp produces an extra parens on a lambda
---promote' (TH.ParensE e) = [p| TH.ParensE $(promote' e) |]
-promote' (TH.LamE ps e) = [p| TH.LamE $(TH.ListP <$> mapM promotePat ps) $(promote' e)|] -- >>= return . error . show
-promote' a = error $ "promote' error: " ++ show a
+--promote' a = error $ "promote' does not support conversion of " ++ show a ++ " into a PatQ"
 
 pattern Name s = (TH.Name (TH.OccName s) TH.NameS)
 
+{-
 rule :: TH.QuasiQuoter
 rule = TH.QuasiQuoter {
         TH.quoteExp = \input -> case parseExp input of
-            Right b -> [| promote' b |]
+            Right (everywhere (mkT normaliseName) -> b) -> [| b |]
             Left c -> error $ "Exp: cannot parse rule pattern: " ++ c ++ " " ++ input
       , TH.quotePat = \input -> case parseExp input of
-             Right b -> promote' b
+             Right (everywhere (mkT normaliseName) -> b) -> promote' b -- could not figure out a way to do this generically
              Left c -> error $ "cannot parse rule pattern: " ++ c ++ " " ++ input
+        }
+-}
+rule :: TH.QuasiQuoter
+rule = TH.QuasiQuoter{
+      TH.quoteExp = \input -> case parseExp input of
+          Right b -> TH.dataToExpQ (const Nothing `extQ` updateNameTE) b
+          Left c -> error $ "Exp: cannot parse rule pattern: " ++ c ++ " " ++ input
+      , TH.quotePat = \input -> case parseExp input of
+          Right b -> TH.dataToPatQ (const Nothing `extQ` updateNameP `extQ` updatePat) b
+          Left c -> error $ "cannot parse rule pattern: " ++ c ++ " " ++ input
       , TH.quoteDec = error "cannot be declarations."
       , TH.quoteType = error "cannot be types."
-        }
+                  }
+deriving instance Typeable TH.TExp
+deriving instance (Data a) => Data (TH.TExp a)
+updateNameP (TH.VarE n@(TH.Name (TH.OccName [s]) TH.NameS))
+    | isLower s = Just $ [p| (TH.returnQ -> $(TH.varP n)) |] >>= return . TH.AsP (Name [s,'_'])
+    | otherwise = Nothing
+updateNameP n = Nothing
+updateNameTP (TH.VarE n@(TH.Name (TH.OccName [s]) TH.NameS))
+    | isLower s = Just $ [p| (TH.returnQ . TH.TExp -> $(TH.varP n)) |] >>= return . TH.AsP (Name [s,'_'])
+    | otherwise = Nothing
+updateNameTP n = Nothing
+
+updateNameE (TH.VarE n@(TH.Name (TH.OccName [s]) TH.NameS))
+    | isLower s = Just $ TH.varE n
+    | otherwise = Nothing
+updateNameE n = Nothing
+updateNameTE (TH.VarE n@(TH.Name (TH.OccName [s]) TH.NameS))
+    | isLower s = Just $ [| TH.TExp $(TH.varE n) |]
+    | otherwise = Nothing
+updateNameTE n = Nothing
+
+updatePat :: TH.Pat -> Maybe (TH.Q (TH.Pat))
+updatePat (TH.VarP (Name s@[t])) = Just $
+    [p| (promote -> $( [p| (TH.returnQ -> $(TH.varP $ Name s)) |]
+        >>= return . TH.AsP (Name $ s ++ "_"))) |]
+        >>= return. TH.AsP (Name $ [t] ++ "'_")
+--updatePat n = error $ show n
+--updatePat _ = Nothing
+rule2 :: TH.QuasiQuoter
+rule2 = rule{
+         TH.quoteExp = \input -> case parseExp input of
+             Right b -> [| TH.TExp $(TH.dataToExpQ (const Nothing `extQ` updateNameTE) b) |]
+             Left c -> error $ "Exp: cannot parse rule pattern: " ++ c ++ " " ++ input
+         , TH.quotePat = \input -> case parseExp input of
+             Right b -> [p| TH.TExp $(TH.dataToPatQ (const Nothing `extQ` updateNameTP `extQ` updatePat) b) |]
+             Left c -> error $ "cannot parse rule pattern: " ++ c ++ " " ++ input
+              }
+
+dataToTExpQ :: Data a => (forall b. Data b => b -> Maybe (TH.Q (TH.TExp z))) -> a -> TH.Q (TH.TExp z)
+dataToTExpQ = TH.dataToQa (TH.returnQ . TH.TExp . TH.ConE)
+                          (TH.returnQ . TH.TExp . TH.LitE)
+                          (foldl (\a b -> do
+                              TH.TExp a' <- a
+                              TH.TExp b' <- b
+                              return $ TH.TExp $ TH.AppE a' b'))
+
+
+
+
+
+
 
 -- The set of free variables in some construct.
 class FreeVars a where

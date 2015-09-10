@@ -1,3 +1,7 @@
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE ImpredicativeTypes #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -22,6 +26,16 @@ import Control.Category.Structural
 import Control.Category.Monoidal
 import Control.Category.Cartesian
 import Control.Categorical.Bifunctor
+import Language.Haskell.TH.Utilities
+import Language.Haskell.TH.Syntax
+import Language.Haskell.TH.Quote
+import Language.Haskell.TH.Lib
+import Language.Haskell.Meta.Parse
+import Data.Generics
+import Control.Applicative
+import Control.CCA.Normalize
+import qualified Language.Haskell.Exts as E
+import Language.Haskell.Meta.Utils
 {-
 line1 :: (Arrow a,Category a,ArrowCCA a) => a b b
 line1 = [arrow| proc g -> do
@@ -40,6 +54,22 @@ line4 = [arrow| proc (x,y) -> do
             w <- id -< y
             id -< z+w
             |]
+arrow2 :: QuasiQuoter
+arrow2 = QuasiQuoter {
+  quoteExp = \input -> case E.parseExpWithMode parseMode input of
+      E.ParseOk result -> do
+        res <- buildA result
+        --res2 <- L.rewriteM (reifyAlpha' ruleSet) res
+        res5 <- return $ cleanNames res -- L.rewriteM (reifyNames) res4
+        reportError $ show res5
+        dataToExpQ (prepRules cca_rules) res5
+        --reportWarning $ show res4
+      E.ParseFailed l err -> error $ "arrow QuasiQuoter: " ++ show l ++ " " ++ show err
+  , quotePat = error "cannot be patterns."
+  , quoteDec = error "cannot be types."
+  , quoteType = error "cannot be types."
+    }
+
 {-
 line5 :: ArrowCCA a => a (Maybe c) c
 line5 = [arrow| proc (Just a) -> id -< a |]

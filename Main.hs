@@ -36,19 +36,18 @@ import Data.Data
 import qualified Control.Lens as L
 import Data.Typeable
 import Control.Arrow(arr)
+import Data.Generics
 
 deriving instance Show NameFlavour
 deriving instance Show NameSpace
-l = [| arr id >>> arr id |] >>= \c -> do
-    let (a,b) = $( [| $(s t)  |] ) c
-    a' <- a
-    b' <- b
-    reportError $ show b'
-    return (a',b')
 
+p = [arrow2| proc n -> do
+                id -< n
+    |]
 
 main :: IO ()
 main = do
+    print $ [| fst >>> arr id >>> arr (+1) |] >>= L.rewriteM reifyLaws
     print $ [| id >>> id |] >>= L.rewriteM reifyLaws
     print $ [| first id >>> id >>> id |] >>= L.rewriteM reifyLaws
     {-
