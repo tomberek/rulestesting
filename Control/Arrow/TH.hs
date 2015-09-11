@@ -1,3 +1,4 @@
+{-# LANGUAGE ImpredicativeTypes #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -20,7 +21,7 @@ Stability   :  unstable
 Portability :  TemplateHaskell,QuasiQuotes,ViewPatterns
 
 -}
-module Control.Arrow.TH (arrow,printCCA,reifyNames,reifyLaws,cca_laws,into,buildA, cleanNames,parseMode) where
+module Control.Arrow.TH (arrow,printCCA,reifyNames,reifyLaws,cca_laws,into,buildA, cleanNames,parseMode,arrFixer,fixity) where
 import qualified Language.Haskell.Exts as E
 import Control.Category
 import Language.Haskell.Meta
@@ -180,6 +181,7 @@ arrow2 = QuasiQuoter {
           --reportWarning $ show res
           res2 <- undefined -- dataToTExpQ (const Nothing _) _
           --reportWarning $ show res4
+          cca2
           arrFixer res2
       E.ParseFailed l err -> error $ "arrow QuasiQuoter: " ++ show l ++ " " ++ show err
   , quotePat = error "cannot be patterns."
@@ -191,6 +193,8 @@ arrow2 = QuasiQuoter {
     where parseMode = E.defaultParseMode{E.extensions=[E.EnableExtension E.Arrows],E.fixities=Just (E.baseFixities)}
 
 
+--cca2 ::Q (TExp (ArrowCCA a => ASyn m b c -> Q (TExp (a b c))))
+cca2 = [| \case (untype -> Arr f :>>> Arr g) -> arr (f . g) |] >>= return . error . show
 
 
 -- | Replaces expressions of `arr`, `arrM`, `delay`, and `returnA` with
@@ -418,7 +422,7 @@ instance Show (ASyn m a b) where
     show (AExp x) = show x
 
 -- We use phantom types to make ASyn an Arrow.
-newtype ASyn (m :: * -> *) b c = AExp AExp
+newtype ASyn (m :: * -> *) b c = AExp {untype::AExp}
 
 instance Category (ASyn m) where
     id = AExp Id

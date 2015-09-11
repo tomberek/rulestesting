@@ -37,12 +37,15 @@ import qualified Control.Lens as L
 import Data.Typeable
 import Control.Arrow(arr)
 import Data.Generics
-
+import Control.Arrow.CCA
+import Control.CCA.Normalize
 deriving instance Show NameFlavour
 deriving instance Show NameSpace
 
-p = [arrow2| proc n -> do
-                id -< n
+p :: ArrowCCA a => a b b
+p = [l|
+    proc n -> do
+        id -< n
     |]
 
 main :: IO ()
@@ -50,12 +53,13 @@ main = do
     print $ [| fst >>> arr id >>> arr (+1) |] >>= L.rewriteM reifyLaws
     print $ [| id >>> id |] >>= L.rewriteM reifyLaws
     print $ [| first id >>> id >>> id |] >>= L.rewriteM reifyLaws
+    printCCA p
     {-
     printCCA line1
     printCCA line2
     printCCA line3
     ---}
-    printCCA line4
+    --printCCA line4
     --print "Just proc-do desugar:"
     --printCCA example4b
     --print "CCA optimized:"

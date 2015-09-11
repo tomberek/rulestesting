@@ -36,6 +36,7 @@ import Control.Applicative
 import Control.CCA.Normalize
 import qualified Language.Haskell.Exts as E
 import Language.Haskell.Meta.Utils
+import qualified Control.Lens as L
 {-
 line1 :: (Arrow a,Category a,ArrowCCA a) => a b b
 line1 = [arrow| proc g -> do
@@ -54,15 +55,38 @@ line4 = [arrow| proc (x,y) -> do
             w <- id -< y
             id -< z+w
             |]
+
+normalizeWith :: (Exp -> Q (Maybe Exp)) -> QuasiQuoter
+normalizeWith rules = arrow2{
+    quoteExp = \input -> case E.parseExpWithMode parseMode input of
+       E.ParseOk result -> do
+         res <- buildA result
+         --res2 <- L.rewriteM (reifyAlpha' ruleSet) res
+         res5 <- returnQ res >>= return . cleanNames >>= return . fixity' -- L.rewriteM (reifyNames) res4
+         reportWarning $ show res5
+         L.rewriteM rules res5 >>= arrFixer
+         --reportWarning $ show res4
+       E.ParseFailed l err -> error $ "arrow QuasiQuoter: " ++ show l ++ " " ++ show err
+       }
+l = normalizeWith cca_ruleset
+normWith :: (Exp -> Q (Maybe Exp)) -> String -> ExpQ
+normWith rules input = case E.parseExpWithMode parseMode input of
+       E.ParseOk result -> do
+         res <- buildA result
+         --res2 <- L.rewriteM (reifyAlpha' ruleSet) res
+         res5 <- returnQ res >>= return . cleanNames >>= return . fixity' -- L.rewriteM (reifyNames) res4
+         reportWarning $ show res5
+         L.rewriteM rules res5 >>= arrFixer
+
 arrow2 :: QuasiQuoter
 arrow2 = QuasiQuoter {
   quoteExp = \input -> case E.parseExpWithMode parseMode input of
       E.ParseOk result -> do
         res <- buildA result
         --res2 <- L.rewriteM (reifyAlpha' ruleSet) res
-        res5 <- return $ cleanNames res -- L.rewriteM (reifyNames) res4
-        reportError $ show res5
-        dataToExpQ (prepRules cca_rules) res5
+        res5 <- returnQ res >>= return . cleanNames >>= return . fixity' -- L.rewriteM (reifyNames) res4
+        reportWarning $ show res5
+        L.rewriteM cca_ruleset res5 >>= arrFixer
         --reportWarning $ show res4
       E.ParseFailed l err -> error $ "arrow QuasiQuoter: " ++ show l ++ " " ++ show err
   , quotePat = error "cannot be patterns."
@@ -70,6 +94,10 @@ arrow2 = QuasiQuoter {
   , quoteType = error "cannot be types."
     }
 
+fixity' :: Data a => a -> a
+fixity' = everywhere (mkT expf)
+    where expf (InfixE (Just l) op (Just r)) = UInfixE ( l) op ( r)
+          expf e = e
 {-
 line5 :: ArrowCCA a => a (Maybe c) c
 line5 = [arrow| proc (Just a) -> id -< a |]

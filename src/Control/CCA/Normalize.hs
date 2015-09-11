@@ -4,6 +4,7 @@
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE LambdaCase #-}
 module Control.CCA.Normalize where
 import Control.Arrow.CCA
 import Language.Haskell.TH
@@ -13,6 +14,7 @@ import Data.Data
 import Data.Generics(extQ)
 
 import Control.Arrow
+import Control.Applicative
 import Control.Category.Associative
 import Control.Category.Structural
 import Control.Monad
@@ -48,26 +50,24 @@ data ValidRule a where
 applyRule :: ValidRule a -> Exp -> Maybe (Q Exp)
 applyRule (V rule) exp = Just $ unTypeQ $ rule (TExp exp)
 
-cca_ruleset :: Exp -> Q Exp
-cca_ruleset [rule| arr f >>> arr g |] = [|  (arr ( $f . $g)) |]
-cca_ruleset [rule| first (arr f) |]    = [| arr ( $f *** id) |]
-cca_ruleset [rule| arr f >>> loopD i g |]    = [| loopD $i ( $g . ($f *** id) ) |]
-cca_ruleset [rule| loopD i f >>> arr g |]    = [| loopD $i ( ($g *** id) . $f ) |]
-cca_ruleset [rule| loopD i f >>> loopD j g |]= [| loopD ($i,$j) ( associate . juggle
+cca_ruleset :: Exp -> Q (Maybe Exp)
+cca_ruleset [rule| arr f >>> arr g |] = intoR [|  (arr ( $g . $f)) |]
+cca_ruleset [rule| first (arr f) |]    = intoR [| arr ( $f *** id) |]
+cca_ruleset [rule| arr f >>> loopD i g |]    = intoR [| loopD $i ( $g . ($f *** id) ) |]
+cca_ruleset [rule| loopD i f >>> arr g |]    = intoR [| loopD $i ( ($g *** id) . $f ) |]
+cca_ruleset [rule| loopD i f >>> loopD j g |]= intoR [| loopD ($i,$j) ( associate . juggle
                                                . ($g *** id) . juggle . ($f *** id) . coassociate) |]
-cca_ruleset [rule| loop (loopD i f) |]       = [| loopD $i (trace (juggle . $f . juggle)) |]
-cca_ruleset [rule| first (loopD i f) |]      = [| loopD $i (juggle . ($f *** id) . juggle) |]
-cca_ruleset [rule| delay i |]                = [| loopD $i swap |]
-cca_ruleset a = error "total function at cca_ruleset"
+cca_ruleset [rule| loop (loopD i f) |]       = intoR [| loopD $i (trace (juggle . $f . juggle)) |]
+cca_ruleset [rule| first (loopD i f) |]      = intoR [| loopD $i (juggle . ($f *** id) . juggle) |]
+cca_ruleset [rule| delay i |]                = intoR [| loopD $i swap |]
+cca_ruleset a =  return Nothing --reportWarning ("cca_ruleset: " ++ show a) >>= 
 
-prepareRule :: Data a => (a -> Q Exp) -> a -> Maybe (Q Exp)
-prepareRule rule exp= distributeQ $ recover (returnQ Nothing) (returnQ exp >>= rule >>= returnQ . Just)
-distributeQ a = case unsafePerformIO $ runQ a of
-              Nothing -> Nothing
-              Just a -> Just (returnQ a)
-cca_rules = map prepareRule [cca_ruleset]
-prepRules :: Data a => [Exp -> Maybe (Q Exp)] -> a -> Maybe (Q Exp)
-prepRules rules = foldl extQ (const Nothing) rules
+intoR = fmap Just
+
+prepRules :: Data a => [Exp -> Q Exp] -> a -> Q (Maybe Exp)
+prepRules rules a =
+    recover (returnQ Nothing) $ foldl extQ (const $ returnQ Nothing) (map r rules) a
+    where r rule e = Just <$> rule e
 
 juggle :: ((t1, t), t2) -> ((t1, t2), t)
 juggle ((x, y), z) = ((x, z), y)

@@ -6,6 +6,7 @@
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 -- Miscellaneous utilities on ordinary Haskell syntax used by the arrow
 -- translator.
 
@@ -16,7 +17,7 @@ module Language.Haskell.TH.Utilities(
     times,
     hsQuote, hsSplice, quoteArr, quoteInit,     -- for CCA
     rule,rule2,promote,promote',ifM,areExpAEq,expEqual --for id detection
-    ,dataToTExpQ
+    ,dataToTExpQ,dataToExpQ'
 ) where
 
 import           Data.Generics
@@ -24,6 +25,9 @@ import           Data.List
 import           Data.Char (isLower)
 import           Language.Haskell.Exts.Syntax
 import qualified Language.Haskell.TH as TH
+import Language.Haskell.TH (Q(..),integerL,charL,rationalL)
+import Language.Haskell.TH.Quote
+import Language.Haskell.TH.Syntax (mkOccName,mkPkgName,mkModName,mkNameG_d)
 import qualified Language.Haskell.TH.Quote as TH
 import qualified Language.Haskell.TH.Syntax as TH
 import           Language.Haskell.TH.Alpha
@@ -32,6 +36,57 @@ import qualified Data.Data.Lens as L
 import Language.Haskell.Meta
 import Language.Haskell.Meta.Utils
 import Control.Applicative
+
+-- | 'dataToExpQ' converts a value to a 'Q Exp' representation of the same
+-- value. It takes a function to handle type-specific cases.
+dataToExpQ'  ::  Data a
+             =>  (forall b . Data b => b -> Q (Maybe TH.Exp))
+             ->  a
+             ->  Q TH.Exp
+dataToExpQ' = dataToQa' TH.conE TH.litE (foldl TH.appE)
+
+dataToQa'  ::  forall a k q. Data a
+                            =>  (TH.Name -> k)
+                            ->  (TH.Lit -> Q q)
+                            ->  (k -> [Q q] -> Q q)
+                            ->  (forall b . Data b => b -> Q (Maybe q))
+                            ->  a
+                            ->  Q q
+dataToQa' mkCon mkLit appCon antiQ t = do
+    anti <- antiQ t
+    case anti of
+      Nothing ->
+          case constrRep constr of
+            AlgConstr _ ->
+                appCon (mkCon conName) conArgs
+              where
+                conName :: TH.Name
+                conName =
+                    case showConstr constr of
+                            "(:)"       -> TH.Name (mkOccName ":") (TH.NameG TH.DataName (mkPkgName "ghc-prim") (mkModName "GHC.Types"))
+                            con@"[]"    -> TH.Name (mkOccName con) (TH.NameG TH.DataName (mkPkgName "ghc-prim") (mkModName "GHC.Types"))
+                            con@('(':_) -> TH.Name (mkOccName con) (TH.NameG TH.DataName (mkPkgName "ghc-prim") (mkModName "GHC.Tuple"))
+                            con         -> mkNameG_d (tyConPackage tycon)
+                                               (tyConModule tycon)
+                                               con
+                  where
+                    tycon :: TyCon
+                    tycon = (typeRepTyCon . typeOf) t
+
+                conArgs :: [Q q]
+                conArgs = gmapQ (dataToQa' mkCon mkLit appCon antiQ) t
+            IntConstr n ->
+                mkLit $ integerL n
+            FloatConstr n ->
+                mkLit $ rationalL n
+            CharConstr c ->
+                mkLit $ charL c
+        where
+          constr :: Constr
+          constr = toConstr t
+
+      Just y -> return y
+
 
 tuplizer :: a -> ([a]->a) -> [a] -> a
 tuplizer u _ [] = u
@@ -101,6 +156,9 @@ rule = TH.QuasiQuoter{
       , TH.quoteDec = error "cannot be declarations."
       , TH.quoteType = error "cannot be types."
                   }
+
+
+
 deriving instance Typeable TH.TExp
 deriving instance (Data a) => Data (TH.TExp a)
 updateNameP (TH.VarE n@(TH.Name (TH.OccName [s]) TH.NameS))
