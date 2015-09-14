@@ -1,3 +1,4 @@
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE ImpredicativeTypes #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
@@ -21,8 +22,10 @@ Stability   :  unstable
 Portability :  TemplateHaskell,QuasiQuotes,ViewPatterns
 
 -}
-module Control.Arrow.TH (arrow,printCCA,reifyNames,reifyLaws,cca_laws,into,buildA, cleanNames,parseMode,arrFixer,fixity) where
+module Control.Arrow.TH (arrow,printCCA,reifyNames,reifyLaws,cca_laws,into,buildA, cleanNames,parseMode,arrFixer,fixity,AExp(..),ASyn(..),fromAExp,findM,areExpAEq',eqM,simplify,rules,reifyAlpha) where
 import qualified Language.Haskell.Exts as E
+import Unsafe.Coerce
+
 import Control.Category
 import Language.Haskell.Meta
 import Language.Haskell.TH
@@ -60,7 +63,9 @@ import Control.Monad(liftM,(>=>),(>>))
 import Data.Data (Data(..))
 import qualified Data.Generics       as G (everywhere, mkT)
 import           Data.Char           (isAlpha)
-import Control.CCA.Normalize
+import Data.Generics.Aliases
+--import Control.CCA.Normalize
+import Data.Typeable
 
 type ArrowExp = ExpQ
 data NodeE =
@@ -170,8 +175,6 @@ arrow = QuasiQuoter {
     }
 parseMode = E.defaultParseMode{E.extensions=[E.EnableExtension E.Arrows],E.fixities=Just (E.baseFixities)}
 
--- | A 'QuasiQuoter' that desugars proc-do notation and prepares for
--- CCA optimization via `arr'` and `delay'` usage.
 arrow2 :: QuasiQuoter
 arrow2 = QuasiQuoter {
   quoteExp = \input -> case E.parseExpWithMode parseMode input of
@@ -179,10 +182,10 @@ arrow2 = QuasiQuoter {
           res <- buildA result
           --res2 <- L.rewriteM (reifyAlpha' ruleSet) res
           --reportWarning $ show res
-          res2 <- undefined -- dataToTExpQ (const Nothing _) _
+          let res' = TExp res
+          --res2 <- (dataToTExpQ' (const Nothing `extQ` d) (res'))
           --reportWarning $ show res4
-          cca2
-          arrFixer res2
+          return $ res
       E.ParseFailed l err -> error $ "arrow QuasiQuoter: " ++ show l ++ " " ++ show err
   , quotePat = error "cannot be patterns."
   , quoteDec = \input -> case E.parseDeclWithMode parseMode input of
@@ -191,6 +194,15 @@ arrow2 = QuasiQuoter {
   , quoteType = error "cannot be types."
     }
     where parseMode = E.defaultParseMode{E.extensions=[E.EnableExtension E.Arrows],E.fixities=Just (E.baseFixities)}
+          {-
+dataToTExpQ' :: ((Typeable b,Typeable c) => TExp (a b c) -> Maybe (Q (TExp (a b c)))) -> ((Typeable b,Typeable c) => TExp (a b c)) -> ((Typeable b,Typeable c)=> Q (TExp (a b c)))
+dataToTExpQ' rules thing = dataToQa (returnQ . TExp . ConE)
+                                    (returnQ . TExp . LitE)
+                                    (foldl (\a b -> do
+                                        TExp a' <- a
+                                        TExp b' <- b
+                                        return $ TExp $ AppE a' b')) (const Nothing `extQ` rules) thing
+          -}
 
 
 --cca2 ::Q (TExp (ArrowCCA a => ASyn m b c -> Q (TExp (a b c))))

@@ -196,13 +196,13 @@ rule2 = rule{
              Left c -> error $ "cannot parse rule pattern: " ++ c ++ " " ++ input
               }
 
-dataToTExpQ :: Data a => (forall b. Data b => b -> Maybe (TH.Q (TH.TExp z))) -> a -> TH.Q (TH.TExp z)
-dataToTExpQ = TH.dataToQa (TH.returnQ . TH.TExp . TH.ConE)
-                          (TH.returnQ . TH.TExp . TH.LitE)
-                          (foldl (\a b -> do
-                              TH.TExp a' <- a
-                              TH.TExp b' <- b
-                              return $ TH.TExp $ TH.AppE a' b'))
+dataToTExpQ :: Data a => (forall b. Data b => b -> Maybe (TH.Q (TH.TExp a))) -> TH.TExp a -> TH.Q (TH.TExp a)
+dataToTExpQ (rules:: forall b. Data b=> b -> Maybe (TH.Q (TH.TExp a))) thing = TH.dataToQa (TH.returnQ . TH.TExp . TH.ConE)
+                                                                                           (TH.returnQ . TH.TExp . TH.LitE)
+                                                                                           (foldl (\a b -> do
+                                                                                               TH.TExp a' <- a
+                                                                                               TH.TExp b' <- b
+                                                                                               return $ TH.TExp $ TH.AppE a' b')) rules thing
 
 
 

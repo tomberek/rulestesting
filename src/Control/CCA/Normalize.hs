@@ -1,9 +1,13 @@
+{-# LANGUAGE ImpredicativeTypes #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE LambdaCase #-}
 module Control.CCA.Normalize where
 import Control.Arrow.CCA
@@ -21,14 +25,29 @@ import Control.Monad
 import Control.Category
 import Prelude hiding (id,(.))
 import System.IO.Unsafe(unsafePerformIO)
+import qualified Data.Constraint as C
+import qualified Data.Constraint.Unsafe as C
+import qualified Data.Constraint.Forall as C
+import Unsafe.Coerce
+import Control.Arrow.CCA.Optimize
 
 cca_rule1 :: (ArrowCCA a) => TExp (a b c) -> Q (TExp (a b c))
 cca_rule1 [rule2| arr f >>> arr g |] = [||  (arr ( $$f . $$g)) ||]
     where args :: f~TExp (b ->d ) => g ~ TExp (d -> c) => args
           args = undefined
 
-d :: (ArrowCCA a) => TExp (a b c) -> Maybe (Q (TExp (a b c)))
+d :: (ArrowCCA a) => (TExp (a b c) -> Maybe (Q (TExp (a b c))))
 d = Just . cca_rule1
+
+d2 :: Exp -> Q Exp
+d2 = \texp -> unTypeQ $ cca_rule1 $ (TExp texp :: TExp (ASyn m a b))
+
+d2a = d3 (C.Dict :: C.Dict (ArrowCCA (ASyn m))) cca_rule1
+-- | Needs a free proxy to untyp TExp
+-- Usage: (d3 (Id :: ASyn m a b) cca_rule1) :: Exp -> Q Exp
+d3 :: C.Dict (ctx a) -> (ctx a => TExp (a b c) -> Q (TExp (a b c))) -> Exp -> Q Exp
+d3 C.Dict rule texp = unTypeQ $ rule $ TExp (texp )
+
 cca_rule2 :: (ArrowCCA a) => TExp (a (b,d) (c,d)) -> Q (TExp (a (b,d) (c,d)))
 cca_rule2 [rule2| first (arr f) |]    = [|| arr ( $$f *** id) ||]
 e :: (ArrowCCA a) => TExp (a (b,d) (c,d)) -> Maybe (Q (TExp (a (b,d) (c,d))))
@@ -42,7 +61,7 @@ unTypeRule rule exp = unTypeQ $ rule g
 
 cca_rulesetT :: ArrowCCA a =>[ValidRule a]
 cca_rulesetT = [ V cca_rule1, V cca_rule2]
-dataEQ :: (Data (a b c),Data z, ArrowCCA a) => z -> Q (TExp (a b c))
+dataEQ :: (Data (a b c), ArrowCCA a) => TExp (a b c) -> Q (TExp (a b c))
 dataEQ = dataToTExpQ (const Nothing `extQ` d)
 
 data ValidRule a where
