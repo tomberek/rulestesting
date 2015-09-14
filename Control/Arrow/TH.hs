@@ -1,3 +1,4 @@
+{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE ImpredicativeTypes #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -22,7 +23,7 @@ Stability   :  unstable
 Portability :  TemplateHaskell,QuasiQuotes,ViewPatterns
 
 -}
-module Control.Arrow.TH (arrow,printCCA,reifyNames,reifyLaws,cca_laws,into,buildA, cleanNames,parseMode,arrFixer,fixity,AExp(..),ASyn(..),fromAExp,findM,areExpAEq',eqM,simplify,rules,reifyAlpha) where
+module Control.Arrow.TH (arrow,printCCA,reifyNames,reifyLaws,cca_laws,into,buildA, cleanNames,parseMode,arrFixer,fixity,AExp(..),ASyn(..),fromAExp,findM,areExpAEq',eqM,simplify,rules,reifyAlpha,category,C.Dict(..)) where
 import qualified Language.Haskell.Exts as E
 import Unsafe.Coerce
 
@@ -61,11 +62,12 @@ import           Control.Arrow hiding (first,second,(***),(&&&))
 import qualified Control.Arrow as A
 import Control.Monad(liftM,(>=>),(>>))
 import Data.Data (Data(..))
-import qualified Data.Generics       as G (everywhere, mkT)
+import qualified Data.Generics       as G (everywhere,everywhereM,mkT)
 import           Data.Char           (isAlpha)
 import Data.Generics.Aliases
 --import Control.CCA.Normalize
 import Data.Typeable
+import qualified Data.Constraint as C
 
 type ArrowExp = ExpQ
 data NodeE =
@@ -108,12 +110,12 @@ into' b = Just <$> b
 reifyLaws :: Exp -> Q (Maybe Exp)
 reifyLaws =
     \case
-        [rule| id >>> id |]  -> into [| id |]
-        [rule| id >>> x |]  -> into [| $x |]
-        [rule| x >>> id |] -> into [| $x |]
-        [rule| x &&& y |] | x_ == y_ -> into [| $x >>> diag |]
-        [rule| first id |]   -> into [| id |]
-        [rule| arr (\x -> y) |] | y_ == y_ -> into [| id |]
+        [rule| id >>> id |]  -> intoA [| id |]
+        [rule| id >>> x |]  -> intoA [| $x |]
+        [rule| x >>> id |] -> intoA [| $x |]
+        [rule| x &&& y |] | x_ == y_ -> intoA [| $x >>> diag |]
+        [rule| first id |]   -> intoA [| id |]
+        [rule| arr (\x -> y) |] | x_ == y_ -> intoA [| id |]
 {-
           [rule| arr (\(x_,z_) -> y_) |] | x__ == y__ -> into [| fst |]
           [rule| arr (\(x_,z_) -> y_) |] | z__ == y__ -> into [| snd |]
@@ -136,14 +138,14 @@ s a = do
     return $ LamCaseE as
 
 cca_laws =  \case
-          [rule| arr f >>> arr g |] -> into [| arr ($g . $f) |]
-          [rule| fst |] -> into [| arr fst |]
+          [rule| arr f >>> arr g |] -> intoA [| arr ($g . $f) |]
+          [rule| fst |] -> intoA [| arr fst |]
           _ -> return Nothing
 
 cca [rule| arr f >>> arr g |] = [| arr ( $g . $f) |]
 cca [rule| x &&& y |] | x_ == y_ = [| $x >>> diag |]
-into :: ExpQ -> Q (Maybe Exp)
-into b = Just <$> b
+intoA :: ExpQ -> Q (Maybe Exp)
+intoA b = Just <$> b
 
 ruleSet = [
         --([| arr (\a -> a) |],[| id |]) -- Category
@@ -194,7 +196,31 @@ arrow2 = QuasiQuoter {
   , quoteType = error "cannot be types."
     }
     where parseMode = E.defaultParseMode{E.extensions=[E.EnableExtension E.Arrows],E.fixities=Just (E.baseFixities)}
-          {-
+
+category :: C.Dict (con a) -> [(con a => TExp (a b c) -> (Q (TExp (a b c))))] -> QuasiQuoter
+category s@C.Dict rules = QuasiQuoter {
+  quoteExp = \input -> case E.parseExpWithMode parseMode input of
+      E.ParseOk result -> do
+          res <- buildA result
+          --res2 <- L.rewriteM (reifyAlpha' ruleSet) res
+          --reportWarning $ show res
+          let [a,b] = unTypeRule s <$> rules
+          let ruleTs :: Data a => a -> Q a
+              ruleTs = return `extM` a `extM` b
+              r :: Data a => a -> Q a
+              r = foldl extM return (unTypeRule s <$> rules)
+          res2 <- G.everywhereM (r) $ cleanNames $ fixity' res
+          reportWarning $ show res2
+          return res2 >>= arrFixer
+      E.ParseFailed l err -> error $ "arrow QuasiQuoter: " ++ show l ++ " " ++ show err
+  , quotePat = error "cannot be patterns."
+  , quoteDec = error "category: cannot by dec"
+  , quoteType = error "cannot be types."
+    }
+    where parseMode = E.defaultParseMode{E.extensions=[E.EnableExtension E.Arrows],E.fixities=Just (E.baseFixities)}
+
+
+ {-
 dataToTExpQ' :: ((Typeable b,Typeable c) => TExp (a b c) -> Maybe (Q (TExp (a b c)))) -> ((Typeable b,Typeable c) => TExp (a b c)) -> ((Typeable b,Typeable c)=> Q (TExp (a b c)))
 dataToTExpQ' rules thing = dataToQa (returnQ . TExp . ConE)
                                     (returnQ . TExp . LitE)
@@ -351,6 +377,10 @@ areExpAEq' f g = do
 fixity :: Data a => a -> a
 fixity = G.everywhere (G.mkT expf)
     where expf (UInfixE l op r) = InfixE (Just l) op (Just r)
+          expf e = e
+fixity' :: Data a => a -> a
+fixity' = G.everywhere (G.mkT expf)
+    where expf (InfixE (Just l) op (Just r)) = UInfixE l op r
           expf e = e
 
 -- | Used to measure progress for normalization using rewriteM

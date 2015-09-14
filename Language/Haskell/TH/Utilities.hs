@@ -1,3 +1,4 @@
+{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE StandaloneDeriving #-}
@@ -16,8 +17,7 @@ module Language.Haskell.TH.Utilities(
     tuple, tupleP, tuplizer,
     times,
     hsQuote, hsSplice, quoteArr, quoteInit,     -- for CCA
-    rule,rule2,promote,promote',ifM,areExpAEq,expEqual --for id detection
-    ,dataToTExpQ,dataToExpQ'
+    rule,rule2,promote,promote',ifM,areExpAEq,expEqual,unTypeRule,into --for id detection
 ) where
 
 import           Data.Generics
@@ -36,9 +36,18 @@ import qualified Data.Data.Lens as L
 import Language.Haskell.Meta
 import Language.Haskell.Meta.Utils
 import Control.Applicative
+import qualified Data.Constraint as C
+
+
+into = Just
+-- | Needs a free proxy to untyp TExp
+-- Usage: (d3 (Id :: ASyn m a b) cca_rule1) :: Exp -> Q Exp
+unTypeRule :: C.Dict (ctx a) -> (ctx a => TH.TExp (a b c) -> (Q (TH.TExp (a b c)))) -> TH.Exp -> (Q TH.Exp)
+unTypeRule C.Dict rule texp = TH.unTypeQ <$> rule $ TH.TExp texp
 
 -- | 'dataToExpQ' converts a value to a 'Q Exp' representation of the same
 -- value. It takes a function to handle type-specific cases.
+{-
 dataToExpQ'  ::  Data a
              =>  (forall b . Data b => b -> Q (Maybe TH.Exp))
              ->  a
@@ -86,7 +95,7 @@ dataToQa' mkCon mkLit appCon antiQ t = do
           constr = toConstr t
 
       Just y -> return y
-
+-}
 
 tuplizer :: a -> ([a]->a) -> [a] -> a
 tuplizer u _ [] = u
@@ -184,6 +193,12 @@ updatePat (TH.VarP (Name s@[t])) = Just $
     [p| (promote -> $( [p| (TH.returnQ -> $(TH.varP $ Name s)) |]
         >>= return . TH.AsP (Name $ s ++ "_"))) |]
         >>= return. TH.AsP (Name $ [t] ++ "'_")
+
+-- | Cannot cope with un-handled fixities, ensure all rules have clearly resolved fixity
+updateFixity :: TH.Exp -> TH.Exp
+updateFixity (TH.UInfixE l o r) = TH.InfixE (Just l) o (Just r)
+updateFixity n = n
+
 --updatePat n = error $ show n
 --updatePat _ = Nothing
 rule2 :: TH.QuasiQuoter
@@ -192,10 +207,15 @@ rule2 = rule{
              Right b -> [| TH.TExp $(TH.dataToExpQ (const Nothing `extQ` updateNameTE) b) |]
              Left c -> error $ "Exp: cannot parse rule pattern: " ++ c ++ " " ++ input
          , TH.quotePat = \input -> case parseExp input of
-             Right b -> [p| TH.TExp $(TH.dataToPatQ (const Nothing `extQ` updateNameTP `extQ` updatePat) b) |]
+             Right b -> do
+                 let b' = everywhere (id `extT` updateFixity) b
+                 out <- [p| TH.TExp $(TH.dataToPatQ (const Nothing `extQ` updateNameTP `extQ` updatePat) b) |]
+                 TH.reportWarning $ show out
+                 return out
              Left c -> error $ "cannot parse rule pattern: " ++ c ++ " " ++ input
               }
 
+{-
 dataToTExpQ :: Data a => (forall b. Data b => b -> Maybe (TH.Q (TH.TExp a))) -> TH.TExp a -> TH.Q (TH.TExp a)
 dataToTExpQ (rules:: forall b. Data b=> b -> Maybe (TH.Q (TH.TExp a))) thing = TH.dataToQa (TH.returnQ . TH.TExp . TH.ConE)
                                                                                            (TH.returnQ . TH.TExp . TH.LitE)
@@ -204,6 +224,7 @@ dataToTExpQ (rules:: forall b. Data b=> b -> Maybe (TH.Q (TH.TExp a))) thing = T
                                                                                                TH.TExp b' <- b
                                                                                                return $ TH.TExp $ TH.AppE a' b')) rules thing
 
+-}
 
 
 

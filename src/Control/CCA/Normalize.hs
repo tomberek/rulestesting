@@ -31,43 +31,24 @@ import qualified Data.Constraint.Forall as C
 import Unsafe.Coerce
 import Control.Arrow.CCA.Optimize
 
-cca_rule1 :: (ArrowCCA a) => TExp (a b c) -> Q (TExp (a b c))
-cca_rule1 [rule2| arr f >>> arr g |] = [||  (arr ( $$f . $$g)) ||]
-    where args :: f~TExp (b ->d ) => g ~ TExp (d -> c) => args
-          args = undefined
-
-d :: (ArrowCCA a) => (TExp (a b c) -> Maybe (Q (TExp (a b c))))
-d = Just . cca_rule1
-
-d2 :: Exp -> Q Exp
-d2 = \texp -> unTypeQ $ cca_rule1 $ (TExp texp :: TExp (ASyn m a b))
-
-d2a = d3 (C.Dict :: C.Dict (ArrowCCA (ASyn m))) cca_rule1
--- | Needs a free proxy to untyp TExp
--- Usage: (d3 (Id :: ASyn m a b) cca_rule1) :: Exp -> Q Exp
-d3 :: C.Dict (ctx a) -> (ctx a => TExp (a b c) -> Q (TExp (a b c))) -> Exp -> Q Exp
-d3 C.Dict rule texp = unTypeQ $ rule $ TExp (texp )
+cca_rule1 :: (ArrowCCA a) => TExp (a b c) -> (Q (TExp (a b c)))
+cca_rule1 [rule2| arr f >>> arr g |] = [|| arr ( $$g . $$f) ||]
+     where args :: f~TExp (b ->d ) => g ~ TExp (d -> c) => args
+           args = undefined
+cca_rule1 a = do
+    return a
 
 cca_rule2 :: (ArrowCCA a) => TExp (a (b,d) (c,d)) -> Q (TExp (a (b,d) (c,d)))
 cca_rule2 [rule2| first (arr f) |]    = [|| arr ( $$f *** id) ||]
+cca_rule2 a = return a
+
+cca_rule3 :: Rule Arrow a b b
+cca_rule3 [rule2| arr (\n -> m) |] | error (show (n_,m_)) == n_ = [|| id ||]
+cca_rule3 a = return a
+
+type Rule ctx a b c = ctx a => TExp (a b c) -> Q (TExp (a b c))
 e :: (ArrowCCA a) => TExp (a (b,d) (c,d)) -> Maybe (Q (TExp (a (b,d) (c,d))))
 e = Just . cca_rule2
-
-unTypeRule :: (TExp (a b c) -> Q (TExp (a b c))) -> Exp -> Q Exp
-unTypeRule rule exp = unTypeQ $ rule g
-    where
-        g :: TExp (a b c)
-        g = TExp exp
-
-cca_rulesetT :: ArrowCCA a =>[ValidRule a]
-cca_rulesetT = [ V cca_rule1, V cca_rule2]
-dataEQ :: (Data (a b c), ArrowCCA a) => TExp (a b c) -> Q (TExp (a b c))
-dataEQ = dataToTExpQ (const Nothing `extQ` d)
-
-data ValidRule a where
-    V ::(TExp (a b c) -> Q (TExp (a b c))) -> ValidRule a
-applyRule :: ValidRule a -> Exp -> Maybe (Q Exp)
-applyRule (V rule) exp = Just $ unTypeQ $ rule (TExp exp)
 
 cca_ruleset :: Exp -> Q (Maybe Exp)
 cca_ruleset [rule| arr f >>> arr g |] = intoR [|  (arr ( $g . $f)) |]
@@ -82,6 +63,22 @@ cca_ruleset [rule| delay i |]                = intoR [| loopD $i swap |]
 cca_ruleset a =  return Nothing --reportWarning ("cca_ruleset: " ++ show a) >>= 
 
 intoR = fmap Just
+
+cca_rulesetT :: ArrowCCA a => TExp (a b c) -> Q (Maybe (TExp (a b c)))
+cca_rulesetT [rule2| arr f >>> arr g |] = intoR [||  (arr ( $$g . $$f)) ||]
+cca_rulesetT [rule2| arr f >>> loopD i g |]    = intoR [|| loopD $$i ( $$g . ($$f *** id) ) ||]
+cca_rulesetT [rule2| loopD i f >>> arr g |]    = intoR [|| loopD $$i ( ($$g *** id) . $$f ) ||]
+cca_rulesetT [rule2| loopD i f >>> loopD j g |]= intoR [|| loopD ($$i,$$j) ( associate . juggle
+                                                 . ($$g *** id) . juggle . ($$f *** id) . coassociate) ||]
+cca_rulesetT [rule2| loop (loopD i f) |]       = intoR [|| loopD $$i (trace (juggle . $$f . juggle)) ||]
+cca_rulesetT a =  return Nothing --reportWarning ("cca_ruleset: " ++ show a) >>=
+
+cca_rulesetT2 :: ArrowCCA a => TExp (a (b,b1) (c,b1)) -> Q (Maybe (TExp (a (b,b1) (c,b1))))
+cca_rulesetT2 [rule2| first (arr f) |]    = intoR [|| arr ( $$f *** id) ||]
+cca_rulesetT2 [rule2| first (loopD i f) |]      = intoR [|| loopD $$i (juggle . ($$f *** id) . juggle) ||]
+
+cca_rulesetT3 :: ArrowCCA a => TExp (a (b,c) (b,c)) -> Q (Maybe (TExp (a (b,c) (b,c))))
+cca_rulesetT3 [rule2| delay i |]                = intoR [|| loopD $$i swap ||]
 
 prepRules :: Data a => [Exp -> Q Exp] -> a -> Q (Maybe Exp)
 prepRules rules a =

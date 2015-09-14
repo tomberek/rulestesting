@@ -43,16 +43,16 @@ deriving instance Show NameFlavour
 deriving instance Show NameSpace
 
 p :: ArrowCCA a => a b b
-p = [l|
+p = [catCCA|
     proc n -> do
         id -< n
     |]
 
 main :: IO ()
 main = do
-    print $ [| fst >>> arr id >>> arr (+1) |] >>= L.rewriteM reifyLaws
-    print $ [| id >>> id |] >>= L.rewriteM reifyLaws
-    print $ [| first id >>> id >>> id |] >>= L.rewriteM reifyLaws
+    --print $ [| fst >>> arr id >>> arr (+1) |] >>= L.rewriteM reifyLaws
+    --print $ [| id >>> id |] >>= L.rewriteM reifyLaws
+    --print $ [| first id >>> id >>> id |] >>= L.rewriteM reifyLaws
     printCCA p
     {-
     printCCA line1

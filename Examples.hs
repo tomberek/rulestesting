@@ -56,48 +56,7 @@ line4 = [arrow| proc (x,y) -> do
             id -< z+w
             |]
 
-normalizeWith :: (Exp -> Q (Maybe Exp)) -> QuasiQuoter
-normalizeWith rules = arrow2{
-    quoteExp = \input -> case E.parseExpWithMode parseMode input of
-       E.ParseOk result -> do
-         res <- buildA result
-         --res2 <- L.rewriteM (reifyAlpha' ruleSet) res
-         res5 <- returnQ res >>= return . cleanNames >>= return . fixity' -- L.rewriteM (reifyNames) res4
-         reportWarning $ show res5
-         L.rewriteM rules res5 >>= arrFixer
-         --reportWarning $ show res4
-       E.ParseFailed l err -> error $ "arrow QuasiQuoter: " ++ show l ++ " " ++ show err
-       }
-l = normalizeWith cca_ruleset
-normWith :: (Exp -> Q (Maybe Exp)) -> String -> ExpQ
-normWith rules input = case E.parseExpWithMode parseMode input of
-       E.ParseOk result -> do
-         res <- buildA result
-         --res2 <- L.rewriteM (reifyAlpha' ruleSet) res
-         res5 <- returnQ res >>= return . cleanNames >>= return . fixity' -- L.rewriteM (reifyNames) res4
-         reportWarning $ show res5
-         L.rewriteM rules res5 >>= arrFixer
-
-arrow2 :: QuasiQuoter
-arrow2 = QuasiQuoter {
-  quoteExp = \input -> case E.parseExpWithMode parseMode input of
-      E.ParseOk result -> do
-        res <- buildA result
-        --res2 <- L.rewriteM (reifyAlpha' ruleSet) res
-        res5 <- returnQ res >>= return . cleanNames >>= return . fixity' -- L.rewriteM (reifyNames) res4
-        reportWarning $ show res5
-        L.rewriteM cca_ruleset res5 >>= arrFixer
-        --reportWarning $ show res4
-      E.ParseFailed l err -> error $ "arrow QuasiQuoter: " ++ show l ++ " " ++ show err
-  , quotePat = error "cannot be patterns."
-  , quoteDec = error "cannot be types."
-  , quoteType = error "cannot be types."
-    }
-
-fixity' :: Data a => a -> a
-fixity' = everywhere (mkT expf)
-    where expf (InfixE (Just l) op (Just r)) = UInfixE ( l) op ( r)
-          expf e = e
+catCCA = category (Dict :: Dict (ArrowCCA (ASyn m))) [cca_rule1,cca_rule2,cca_rule3]
 {-
 line5 :: ArrowCCA a => a (Maybe c) c
 line5 = [arrow| proc (Just a) -> id -< a |]
