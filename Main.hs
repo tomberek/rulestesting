@@ -38,7 +38,7 @@ import Data.Typeable
 import Control.Arrow(arr)
 import Data.Generics
 import Control.Arrow.CCA
-import Control.CCA.Normalize
+import Control.Arrow.CCA.Rules
 deriving instance Show NameFlavour
 deriving instance Show NameSpace
 

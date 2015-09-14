@@ -197,21 +197,23 @@ arrow2 = QuasiQuoter {
     }
     where parseMode = E.defaultParseMode{E.extensions=[E.EnableExtension E.Arrows],E.fixities=Just (E.baseFixities)}
 
-category :: C.Dict (con a) -> [(con a => TExp (a b c) -> (Q (TExp (a b c))))] -> QuasiQuoter
-category s@C.Dict rules = QuasiQuoter {
+--category :: C.Dict (con a) -> [(con a => TExp (a b c) -> (Q (TExp (a b c))))] -> QuasiQuoter
+category :: [Exp -> Q Exp] -> QuasiQuoter
+category rules = QuasiQuoter {
   quoteExp = \input -> case E.parseExpWithMode parseMode input of
       E.ParseOk result -> do
           res <- buildA result
           --res2 <- L.rewriteM (reifyAlpha' ruleSet) res
           --reportWarning $ show res
-          let [a,b] = unTypeRule s <$> rules
-          let ruleTs :: Data a => a -> Q a
-              ruleTs = return `extM` a `extM` b
-              r :: Data a => a -> Q a
-              r = foldl extM return (unTypeRule s <$> rules)
-          res2 <- G.everywhereM (r) $ cleanNames $ fixity' res
-          reportWarning $ show res2
-          return res2 >>= arrFixer
+          --let [a,b] = unTypeRule s <$> rules
+          --let ruleTs :: Data a => a -> Q a
+           --     ruleTs = return `extM` a `extM` b
+          let      r :: Data a => a -> Q a
+                   r = foldl extM return rules
+          res2 <- G.everywhereM r $ cleanNames $ fixity' res
+          res3 <- G.everywhereM r $ cleanNames $ fixity' res2
+          reportWarning $ show res3
+          return res3 >>= arrFixer
       E.ParseFailed l err -> error $ "arrow QuasiQuoter: " ++ show l ++ " " ++ show err
   , quotePat = error "cannot be patterns."
   , quoteDec = error "category: cannot by dec"
@@ -232,7 +234,7 @@ dataToTExpQ' rules thing = dataToQa (returnQ . TExp . ConE)
 
 
 --cca2 ::Q (TExp (ArrowCCA a => ASyn m b c -> Q (TExp (a b c))))
-cca2 = [| \case (untype -> Arr f :>>> Arr g) -> arr (f . g) |] >>= return . error . show
+cca2 = [| \case (untype -> Arr f :>>> Arr g) -> arr (f . g) |] -- >>= return . error . show
 
 
 -- | Replaces expressions of `arr`, `arrM`, `delay`, and `returnA` with

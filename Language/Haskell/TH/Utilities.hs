@@ -17,7 +17,7 @@ module Language.Haskell.TH.Utilities(
     tuple, tupleP, tuplizer,
     times,
     hsQuote, hsSplice, quoteArr, quoteInit,     -- for CCA
-    rule,rule2,promote,promote',ifM,areExpAEq,expEqual,unTypeRule,into --for id detection
+    rule,rule2,promote,promote',ifM,areExpAEq,expEqual,unTypeRule,into,RuleT --for id detection
 ) where
 
 import           Data.Generics
@@ -165,9 +165,6 @@ rule = TH.QuasiQuoter{
       , TH.quoteDec = error "cannot be declarations."
       , TH.quoteType = error "cannot be types."
                   }
-
-
-
 deriving instance Typeable TH.TExp
 deriving instance (Data a) => Data (TH.TExp a)
 updateNameP (TH.VarE n@(TH.Name (TH.OccName [s]) TH.NameS))
@@ -199,6 +196,10 @@ updateFixity :: TH.Exp -> TH.Exp
 updateFixity (TH.UInfixE l o r) = TH.InfixE (Just l) o (Just r)
 updateFixity n = n
 
+-- | Remove parens, how does this play with fixities and operators? Superfluous?
+updateParens :: TH.Exp -> TH.Exp
+updateParens (TH.ParensE e) = e
+updateParens n =n
 --updatePat n = error $ show n
 --updatePat _ = Nothing
 rule2 :: TH.QuasiQuoter
@@ -208,12 +209,14 @@ rule2 = rule{
              Left c -> error $ "Exp: cannot parse rule pattern: " ++ c ++ " " ++ input
          , TH.quotePat = \input -> case parseExp input of
              Right b -> do
-                 let b' = everywhere (id `extT` updateFixity) b
-                 out <- [p| TH.TExp $(TH.dataToPatQ (const Nothing `extQ` updateNameTP `extQ` updatePat) b) |]
+                 let b' = everywhere (id `extT` updateFixity `extT` updateParens) b
+                 out <- [p| TH.TExp $(TH.dataToPatQ (const Nothing `extQ` updateNameTP `extQ` updatePat) b') |]
                  TH.reportWarning $ show out
                  return out
              Left c -> error $ "cannot parse rule pattern: " ++ c ++ " " ++ input
               }
+
+type RuleT ctx a b c = ctx a => TH.TExp (a b c) -> Q (TH.TExp (a b c))
 
 {-
 dataToTExpQ :: Data a => (forall b. Data b => b -> Maybe (TH.Q (TH.TExp a))) -> TH.TExp a -> TH.Q (TH.TExp a)

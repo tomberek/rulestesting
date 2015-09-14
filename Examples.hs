@@ -33,10 +33,11 @@ import Language.Haskell.TH.Lib
 import Language.Haskell.Meta.Parse
 import Data.Generics
 import Control.Applicative
-import Control.CCA.Normalize
+import Control.Arrow.CCA.Rules
 import qualified Language.Haskell.Exts as E
 import Language.Haskell.Meta.Utils
 import qualified Control.Lens as L
+import Control.Category.Rules
 {-
 line1 :: (Arrow a,Category a,ArrowCCA a) => a b b
 line1 = [arrow| proc g -> do
@@ -56,7 +57,9 @@ line4 = [arrow| proc (x,y) -> do
             id -< z+w
             |]
 
-catCCA = category (Dict :: Dict (ArrowCCA (ASyn m))) [cca_rule1,cca_rule2,cca_rule3]
+--catCCA = category (Dict :: Dict (ArrowCCA (ASyn m))) cca_ruleset
+--catCCA = category $ cca_ruleset ++ category_ruleset
+catCCA = category $ [category_id']
 {-
 line5 :: ArrowCCA a => a (Maybe c) c
 line5 = [arrow| proc (Just a) -> id -< a |]
