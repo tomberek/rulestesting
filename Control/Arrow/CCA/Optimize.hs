@@ -22,7 +22,6 @@ module Control.Arrow.CCA.Optimize
     (norm, normOpt, fromAExp, normalize,normalizeTrace,
     runCCNF, nth', runIt,
     pprNorm, pprNormOpt, printCCA, ASyn(..),AExp(..),ArrowCCA(..),(.),id
-    ,reifyAlpha
     --cross, dup, swap, assoc, unassoc, juggle, trace, mirror, untag, tagT, untagT,
     --swapE, dupE
     ) where

@@ -23,7 +23,12 @@ Stability   :  unstable
 Portability :  TemplateHaskell,QuasiQuotes,ViewPatterns
 
 -}
-module Control.Arrow.TH (arrow,printCCA,reifyNames,reifyLaws,cca_laws,into,buildA, cleanNames,parseMode,arrFixer,fixity,AExp(..),ASyn(..),fromAExp,findM,areExpAEq',eqM,simplify,rules,reifyAlpha,category,C.Dict(..)) where
+module Control.Arrow.TH (
+    arrow2,printCCA,into,buildA,
+    cleanNames,parseMode,arrFixer,fixity,
+    AExp(..),ASyn(..),fromAExp,findM,
+    areExpAEq',eqM,simplify,rules,category,C.Dict(..)
+    ) where
 import qualified Language.Haskell.Exts as E
 import Unsafe.Coerce
 
@@ -70,112 +75,6 @@ import Data.Typeable
 import qualified Data.Constraint as C
 import Control.Monad.Trans.Maybe
 
-type ArrowExp = ExpQ
-data NodeE =
-    ProcN {_i::Int,_pat::E.Pat,_expr::E.Exp,_arrowE::ArrowExp}
-    | StmtN {_i::Int,_pat::E.Pat,_expr::E.Exp,_arrowE::ArrowExp}
-    | CmdN  {_i::Int,_pat::E.Pat,_expr::E.Exp,_arrowE::ArrowExp}
-    | LetN {_i::Int,_pat::E.Pat,_expr::E.Exp,_arrowE::ArrowExp}
-instance Show NodeE where
-    show (ProcN i p e _) = "ProcN:" ++ show i ++ show p ++ show e
-    show (StmtN i p e _) = "StmtN" ++ show i ++ show p ++ show e
-    show (CmdN i p e _) = "CmdN" ++ show i ++ show p ++ show e
-    show (LetN i p e _) = show i ++ show p ++ show e
-makeLenses ''NodeE
-
-reifyAlpha :: [(ExpQ,AExp)] -> AExp -> Q (Maybe AExp)
-reifyAlpha ruleSet (Arr e) = findM (\(a,b) -> ifM (areExpAEq' e a) (return $ Just b) $ return Nothing) ruleSet
-reifyAlpha _ e = return Nothing
-reifyAlpha' :: [(ExpQ,ExpQ)] -> Exp -> Q (Maybe Exp)
-reifyAlpha' ruleSet e = do
-    --reportWarning $ show e
-    findM (\(a,b) -> ifM (areExpAEq' (return e) a) (Just <$> b) $ return Nothing) ruleSet
-
-reifyNames :: Exp -> Q (Maybe Exp)
-reifyNames (VarE (Name occname NameS)) = return Nothing
-reifyNames (VarE (Name occname _)) = return $ Just $ VarE (Name occname NameS)
-
---test (const (3::Int) -> s@(const "hi" -> t)) = _
-
-reifyLaws' :: Exp -> Q (Maybe (TExp ((a,b) -> (a,b) )))
-reifyLaws' =
-    \case
-        [rule| id *** id |]  -> into' [|| id ||]
-        e -> return Nothing -- >> reportWarning (show e)
-
-
-
-into' :: Q (TExp a) -> Q (Maybe (TExp a))
-into' b = Just <$> b
-
-reifyLaws :: Exp -> Q (Maybe Exp)
-reifyLaws =
-    \case
-        [rule| id >>> id |]  -> intoA [| id |]
-        [rule| id >>> x |]  -> intoA [| $x |]
-        [rule| x >>> id |] -> intoA [| $x |]
-        [rule| x &&& y |] | x_ == y_ -> intoA [| $x >>> diag |]
-        [rule| first id |]   -> intoA [| id |]
-        [rule| arr (\x -> y) |] | x_ == y_ -> intoA [| id |]
-{-
-          [rule| arr (\(x_,z_) -> y_) |] | x__ == y__ -> into [| fst |]
-          [rule| arr (\(x_,z_) -> y_) |] | z__ == y__ -> into [| snd |]
-          [rule| arr (\x_ -> (y_,z_)) |] | x__ == y__ && x__ == z__ -> into [| diag |]
-          [rule| f_ >>> (g_ >>> h_) |]  -> into [| ($f_ >>> $g_) >>> $h_ |]
--}
-        e -> return Nothing
-
-reifyLawsRight =
-    \case
-    {-
-          [rule| arr f_ >>> arr g_ |]  -> into [| arr ($g_ . $f_) |]
-          [rule| (f_ >>> g_) >>> h_ |]  -> into [| $f_ >>> ($g_ >>> $h_) |]
-          [rule| f_ >>> (g_ >>> h_) |]  -> return Nothing
-    -}
-          e -> reifyLaws e
-s :: Q [Match] -> Q Exp
-s a = do
-    as <- a
-    return $ LamCaseE as
-
-cca_laws =  \case
-          [rule| arr f >>> arr g |] -> intoA [| arr ($g . $f) |]
-          [rule| fst |] -> intoA [| arr fst |]
-          _ -> return Nothing
-
-cca [rule| arr f >>> arr g |] = [| arr ( $g . $f) |]
-cca [rule| x &&& y |] | x_ == y_ = [| $x >>> diag |]
-intoA :: ExpQ -> Q (Maybe Exp)
-intoA b = Just <$> b
-
-ruleSet = [
-        --([| arr (\a -> a) |],[| id |]) -- Category
-        ([| Control.Arrow.arr (\(a,b) -> (a,b)) |],[| id *** id |]) -- Category
-        --,([| arr (\(a,b) -> a) |],[| fst |]) -- Contract
-        --,([| arr (\(a,b) -> b) |],[| snd |]) -- Contract
-        ]
-
--- | A 'QuasiQuoter' that desugars proc-do notation and prepares for
--- CCA optimization via `arr'` and `delay'` usage.
-arrow :: QuasiQuoter
-arrow = QuasiQuoter {
-  quoteExp = \input -> case E.parseExpWithMode parseMode input of
-      E.ParseOk result -> do
-          res <- buildA result
-          --res2 <- L.rewriteM (reifyAlpha' ruleSet) res
-          --reportWarning $ show res
-          res3 <- L.rewriteM (reifyLaws) res
-          res4 <- L.rewriteM (reifyLawsRight) res
-          res5 <- return $ cleanNames res4 -- L.rewriteM (reifyNames) res4
-          --reportWarning $ show res4
-          arrFixer res5
-      E.ParseFailed l err -> error $ "arrow QuasiQuoter: " ++ show l ++ " " ++ show err
-  , quotePat = error "cannot be patterns."
-  , quoteDec = \input -> case E.parseDeclWithMode parseMode input of
-      E.ParseOk result -> undefined
-      E.ParseFailed l err -> error $ "arrow QuasiQuoter in Decl: " ++ show l ++ " " ++ show err
-  , quoteType = error "cannot be types."
-    }
 parseMode = E.defaultParseMode{E.extensions=[E.EnableExtension E.Arrows],E.fixities=Just (E.baseFixities)}
 
 arrow2 :: QuasiQuoter
@@ -220,22 +119,6 @@ category rules = QuasiQuoter {
   , quoteType = error "cannot be types."
     }
      where parseMode = E.defaultParseMode{E.extensions=[E.EnableExtension E.Arrows],E.fixities=Just (E.baseFixities)}
-
-
- {-
-dataToTExpQ' :: ((Typeable b,Typeable c) => TExp (a b c) -> Maybe (Q (TExp (a b c)))) -> ((Typeable b,Typeable c) => TExp (a b c)) -> ((Typeable b,Typeable c)=> Q (TExp (a b c)))
-dataToTExpQ' rules thing = dataToQa (returnQ . TExp . ConE)
-                                    (returnQ . TExp . LitE)
-                                    (foldl (\a b -> do
-                                        TExp a' <- a
-                                        TExp b' <- b
-                                        return $ TExp $ AppE a' b')) (const Nothing `extQ` rules) thing
-          -}
-
-
---cca2 ::Q (TExp (ArrowCCA a => ASyn m b c -> Q (TExp (a b c))))
-cca2 = [| \case (untype -> Arr f :>>> Arr g) -> arr (f . g) |] -- >>= return . error . show
-
 
 -- | Replaces expressions of `arr`, `arrM`, `delay`, and `returnA` with
 -- the versions that have their arguments lifted to TH.
@@ -527,7 +410,7 @@ untag (Right y) = y
 
 -- Pretty printing AExp.
 printCCA :: ASyn m t t1 -> IO ()
-printCCA (AExp x) = runQ (fromAExp x) >>= putStrLn . simplify . pprint
+printCCA (AExp x) = runQ (fromAExp x) >>= putStrLn . pprint -- simplify . pprint
 
 -- Normalization
 -- =============
@@ -610,115 +493,3 @@ simplify = unwords . map (unwords . map aux . words) . lines
         aux x = let (_, v) = break (=='.') x
                 in if length v > 1 then aux (tail v)
                                    else x
-
-
-{-
-findUnit :: IntMap NodeE -> [Int]
-findUnit (toList -> l) = map fst $ Prelude.filter ( (== 0)  . length . freeVars . snd) l
-newtype P = P NodeE
-instance Eq NodeE where
-    (==) = (==) `on` view i
-instance Ord NodeE where
-    compare = compare `on` view i
-
-data Expression = Expression {getEV::Vertex,getPattern::E.Pat,getEE::ExpQ}
-instance Eq Expression where
-     (==) = (==) `on` getEV
-instance Show Expression where
-  show (Expression v p _) = "Expression: " ++ show v ++ show p
-
-
-buildExp :: IntMap NodeE -> Graph -> [Vertex] -> [Expression] -> ExpQ
-buildExp (toList -> [(0,ProcN (-1) E.PWildCard _ e)]) _ [0] [] = e
-buildExp _ _ [] [Expression _ _ e] = e
-buildExp _ _ [g] [Expression v _ e] | g==v = e
-buildExp (fst . findMax -> target) _ _ exps | elem target (map getEV exps) = getEE . fromJust $ Data.List.find ( (==) target . getEV) exps -- got target early, effects?
-buildExp intmap@(fst . findMax -> target) graph [] exps = buildExp intmap graph [target] exps
-buildExp intmap graph goals exps = ifProgress
-    where
-        ifProgress = if (goals==newGoals) && (exps==newExps) then buildExp intmap graph (vertices graph)  exps  --error "loop detected in arrow TH"
-                                                             else Debug.Trace.trace ("called " ++ show goals) $ buildExp intmap graph newGoals newExps
-        flag ind = all (flip elem (map getEV exps)) $ (transposeG graph) ^. ix ind -- tells if a vertex is obtainable
-        flags = findIndices flag goals -- lists obtainable goal indices
-        flagsWithEmpty = [head flags]
-        (newGoals,newExps) = Debug.Trace.trace ("flagged goals: " ++ show flags ++ "out of " ++ show goals ++ " and exps " ++ show exps)
-                                $ step (goals,exps) (map ( (Data.List.!!) goals) flags)
-        step (goals',exps') [] = (goals',exps')
-        step (goals',exps') (flagged:rest) = Debug.Trace.trace (show (goals',exps')) step helper rest
-            where
-                newGoals2 = graph ^. ix flagged
-                helper = (nub $ (Data.List.delete flagged goals') ++ newGoals2, newExps2 ++ remainingExps)
-                helper2 = catMaybes $ map (flip elemIndex $ getEV <$> exps') $ (transposeG graph) ^. ix flagged --indeces in exps of needed exps
-                reqExps = map ((Data.List.!!) exps') helper2
-                remainingExps = (Data.List.\\) exps' reqExps
-                newExps2 =replicate (max 1 $ length newGoals2) $
-                                Expression flagged thisPat $ createConnection flagged reqExps thisExp currentArrow --createExp reqExps
-                thisNode = Debug.Trace.trace (show flagged ++ show intmap) $ intmap ^?! ix flagged
-                thisPat = Debug.Trace.trace (show "pats :" ++ show flagged) $ thisNode ^. pat
-                thisExp = Debug.Trace.trace (show flagged ++ "exp :" ++ show (reqExps)++ show thisPat)
-                         $ thisNode ^. expr
-                currentArrow = Debug.Trace.trace (show "arr :" ++ show (flagged)) $
-                            intmap ^?! ix flagged . arrowE
-
-createConnection :: Int -> [Expression] -> E.Exp -> ArrowExp -> ExpQ
-createConnection 0 [] _ arrowExp = [| $arrowExp |] -- should only be the original req. This doesn't visit literal signaled arrows. No SIDE EFFECTS?
---createConnection _ [] e arrowExp = [| arr (\a -> $(returnQ $ toExp e)) >>> $arrowExp |] -- should only be the original req. This doesn't visit literal signaled arrows. No SIDE EFFECTS?
-createConnection _ exps thisExp arrowExp = defaultConnection exps thisExp arrowExp
-
--- tuplize may break for oddly shaped tuples
-defaultConnection :: [Expression] -> E.Exp -> ArrowExp -> ExpQ
-defaultConnection [] thisExp arrowExp =
-    [| $(fixTuple E.PWildCard thisExp)
-        >>> $arrowExp |]
-        {-
-defaultConnection pats@[e1,e2] thisExp arrowExp = case thisExp of
-    E.Tuple E.Boxed [t1,t2]
-         |  all (flip elem (toName <$> freeVars (getPattern e1))) (toName <$> freeVars t1)
-             && (all (flip elem (toName <$> freeVars (getPattern e2))) (toName <$> freeVars t2))
-                         -> error "hi" --[| $(getEE e1) *** $(getEE e2) >>> $(fixTuple (getPattern e1) t1) *** $(fixTuple (getPattern e2) t2) |]                        -- ***
-         |  all (flip elem (toName <$> freeVars (getPattern e2))) (toName <$> freeVars t1)
-             && (all (flip elem (toName <$> freeVars (getPattern e1))) (toName <$> freeVars t2))
-                         -> [| coidr >>> ($(getEE e2) >>> $(fixTuple (getPattern e2) t1)) *** ($(getEE e1) >>> $(fixTuple (getPattern e1) t2)) >>> $arrowExp |]                        -- ***
-    _ ->
-
-            [| $(getEE e1) &&& $(getEE e2) >>> $(fixTuple (tuplize $ getPattern <$> pats) thisExp) >>> $arrowExp |]
-        -}
-defaultConnection exps thisExp arrowExp =
-    [| $(foldl1 (&:&) (getEE <$> exps))
-         >>> $(fixTuple (tuplize $ getPattern <$> exps) thisExp)
-        >>> $arrowExp |]
-
-(*:*) :: ExpQ -> ExpQ -> ExpQ
-expr1 *:* expr2 = uInfixE expr1 (varE $ mkName "***") expr2
-(&:&) :: ExpQ -> ExpQ -> ExpQ
-expr1 &:& expr2 = uInfixE expr1 (varE $ mkName "&&&") expr2
-
-process :: [NodeE] -> E.Exp -> (Graph,IntMap NodeE)
-process ps (E.Proc _ b c) = Debug.Trace.trace (show b) $ process (ProcN 0 b (E.List []) [|Q.id|] : ps) c
-process ps (E.Do statements) = (buildGr allNodes , fromAscList $ zip (view i <$> allNodes) allNodes)
-    where
-        allNodes = ps ++ (snd $ mapAccumL makeNodes 1 statements)
-        makeNodes ind (E.Generator _ p (E.LeftArrApp (returnQ . toExp -> e1) e2)) = (ind+1,StmtN ind p e2 e1)
-        makeNodes ind (E.Qualifier (E.LeftArrApp (returnQ . toExp -> e1) e2)) = (ind+1,CmdN ind E.PWildCard e2 e1)
-        --makeNodes ind (E.LetStmt (E.BDecls (E.PatBind _ p _ (E.UnGuardedRhs rhs) binds :[]))) = (ind+1,StmtN ind p rhs [| Q.id |])
-        makeNodes _ _ = error "process can only process Generators and Qualifier in Do statements"
-process [] (returnQ . toExp -> e) = (buildG (0,0) [] , singleton 0 $ ProcN (-1) E.PWildCard (E.List []) e)
-process _ e = error $ "does not process rec yet" ++ show e
-
-buildGr :: [NodeE] -> Graph
-buildGr n = buildG (0,length n -1) $ makeEdges n
-
-makeEdges :: [NodeE] -> [Edge]
-makeEdges [] = []
-makeEdges (n:ns) = (makeEdges ns) ++ (catMaybes $ map (makeEdge (Set.fromList $ freeVars $ P n) (view i n)) ns)
-
-makeEdge :: Set.Set E.Name -> Int -> NodeE -> Maybe Edge
-makeEdge names ind node = if Set.null f then Nothing else Just (ind,view i node)
-    where f = names `Set.intersection` (Set.fromList $ freeVars node)
-
-instance FreeVars NodeE where
-    freeVars (ProcN _ _ _ _) = []
-    freeVars ex = freeVars $ ex ^?! expr --ProcN has no freeVars in non-existant expression
-instance FreeVars P where
-    freeVars (P ex) = freeVars $ ex ^. pat
----}

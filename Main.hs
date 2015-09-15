@@ -55,6 +55,7 @@ main = do
     --print $ [| id >>> id |] >>= L.rewriteM reifyLaws
     --print $ [| first id >>> id >>> id |] >>= L.rewriteM reifyLaws
     printCCA p
+    printCCA line4
     {-
     printCCA line1
     printCCA line2

@@ -51,13 +51,12 @@ line3 = [arrow| proc (x,y) -> do
             id -< x |]
 ---}
 line4 :: (Weaken (,) a,Contract (,) a,Category a,ArrowCCA a) => a (Int,Int) Int
-line4 = [arrow| proc (x,y) -> do
-            z <- arr(*2) -< x+1
-            w <- id -< y
-            id -< z+w
-            |]
+line4 = [catCCA| proc (x,y) -> do
+             z <- arr(*2) -< x+1
+             w <- id -< y
+             id -< z+w
+             |]
 
-catCCA = category $ cca_ruleset ++ category_ruleset
 
 {-
 line5 :: ArrowCCA a => a (Maybe c) c

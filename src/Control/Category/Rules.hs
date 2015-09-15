@@ -15,7 +15,7 @@ import Control.Category.Structural
 import Control.Category
 import Prelude hiding (id,(.))
 import qualified Data.Constraint as C
-import Control.Arrow.CCA.Optimize
+import Control.Arrow.TH (ASyn)
 
 category_id_arr :: RuleT Category a b b
 category_id_arr [rule2| arr (\n -> m) |] | m_ == n_ = into [|| id ||]

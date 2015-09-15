@@ -18,7 +18,7 @@ module Language.Haskell.TH.Utilities(
     times,
     hsQuote, hsSplice, quoteArr, quoteInit,     -- for CCA
     rule,rule2,promote,promote',ifM,areExpAEq,expEqual,
-    unTypeRule,into,RuleT,RuleE
+    unTypeRule,into,RuleT,RuleE,
 ) where
 
 import           Data.Generics
@@ -164,29 +164,17 @@ rule2 = rule{
              Left c -> error $ "Exp: cannot parse rule pattern: " ++ c ++ " " ++ input
          , TH.quotePat = \input -> case parseExp input of
              Right b -> do
-                 let b' = L.rewrite (orElse <$> updateFixity' <*>updateParens) b
+                 let b' = L.rewrite (orElse <$> updateFixity' <*> updateParens) b
                  out <- [p| TH.TExp $(TH.dataToPatQ (const Nothing `extQ` updateNameTP `extQ` updatePat) b') |]
                  --TH.reportWarning $ show out
                  return out
              Left c -> error $ "cannot parse rule pattern: " ++ c ++ " " ++ input
-              }
+         , TH.quoteDec = error "cannot be declarations."
+         , TH.quoteType = error "cannot be types."
+                 }
 
 type RuleT ctx a b c = ctx a => TH.TExp (a b c) -> Q (Maybe (TH.TExp (a b c)))
 type RuleE = TH.Exp -> Q (Maybe TH.Exp)
-
-{-
-dataToTExpQ :: Data a => (forall b. Data b => b -> Maybe (TH.Q (TH.TExp a))) -> TH.TExp a -> TH.Q (TH.TExp a)
-dataToTExpQ (rules:: forall b. Data b=> b -> Maybe (TH.Q (TH.TExp a))) thing = TH.dataToQa (TH.returnQ . TH.TExp . TH.ConE)
-                                                                                           (TH.returnQ . TH.TExp . TH.LitE)
-                                                                                           (foldl (\a b -> do
-                                                                                               TH.TExp a' <- a
-                                                                                               TH.TExp b' <- b
-                                                                                               return $ TH.TExp $ TH.AppE a' b')) rules thing
-
--}
-
-
-
 
 
 
@@ -195,7 +183,7 @@ class FreeVars a where
     freeVars :: a -> [Name]
 
 instance FreeVars a => FreeVars [a] where
-    freeVars = foldl' union [] . map freeVars
+      freeVars = foldl' union [] . map freeVars
 
 instance FreeVars Pat where
     freeVars (PVar n) = [n]

@@ -20,5 +20,6 @@ ghc-args:
 excluded-modules:
 - Arrow.hs
 - Auto.hs
+- Control/Arrow/CCA/Optimize.hs
 - src/Control/Category/Monoidal.hs
 - src/Morte/Core.hs

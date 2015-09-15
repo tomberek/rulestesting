@@ -28,7 +28,6 @@ fixTuple PWildCard exp = [| arr (\_ -> $(return $ toExp exp)) |]
 fixTuple pat@(P a) (EP b rest) = [| $(fixTuple pat b) &&& $(fixTuple pat rest) |]                                                     -- diag
 fixTuple (P a) (E b) | toName a == toName b                 = [|id|]                                                                  -- id
                      | otherwise                            = [| arr (\ $(return $ toPat $ PWildCard) -> $(return $ toExp $ E b)) |]  -- arr
-                     {-
 fixTuple pat@(TP a rest@(fmap toName . freeVars -> restFree)) (EP b rest2@(fmap toName . freeVars -> rest2Free))
           |  all (flip elem (toName <$> freeVars a)) (toName <$> freeVars b)
               && (all (flip elem restFree) rest2Free)       = [| $(fixTuple a b) *** $(fixTuple rest rest2) |]                        -- ***
@@ -36,5 +35,4 @@ fixTuple pat@(TP a rest@(fmap toName . freeVars -> restFree)) (EP b rest2@(fmap 
 fixTuple pat@(TP a rest) (E b)
           | elem (toName b) (toName <$> freeVars a)         = [| fst >>> $(fixTuple a (E b)) |]                           -- fst
           | otherwise                                       = [| swap >>> $(fixTuple (TP rest a) (E b)) |]             -- swap
-                     -}
 fixTuple pat b                                              = [| arr (\ $(return $ toPat pat) -> $(return $ toExp b)) |] -- can't "categorize"

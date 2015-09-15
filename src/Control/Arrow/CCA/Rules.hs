@@ -16,8 +16,11 @@ import Control.Category.Structural
 import Control.Category
 import Prelude hiding (id,(.))
 import qualified Data.Constraint as C
-import Control.Arrow.CCA.Optimize
-import Control.Arrow.CCA
+import Control.Arrow.TH (category)
+import Control.Category.Rules (category_ruleset)
+import Control.Arrow.TH (ASyn)
+
+catCCA = category $ cca_ruleset ++ category_ruleset
 
 cca_ruleset :: [Exp -> Q (Maybe Exp)]
 cca_ruleset = let a = C.Dict :: C.Dict (ArrowCCA (ASyn m))
