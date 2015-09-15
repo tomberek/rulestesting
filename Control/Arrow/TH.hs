@@ -60,7 +60,7 @@ import           Control.Category
 import           Prelude             hiding (id, (.),fst,snd)
 import           Control.Arrow hiding (first,second,(***),(&&&))
 import qualified Control.Arrow as A
-import Control.Monad(liftM,(>=>),(>>))
+import Control.Monad(liftM,(>=>),(>>),msum,mplus)
 import Data.Data (Data(..))
 import qualified Data.Generics       as G (everywhere,everywhereM,mkT)
 import           Data.Char           (isAlpha)
@@ -68,6 +68,7 @@ import Data.Generics.Aliases
 --import Control.CCA.Normalize
 import Data.Typeable
 import qualified Data.Constraint as C
+import Control.Monad.Trans.Maybe
 
 type ArrowExp = ExpQ
 data NodeE =
@@ -198,7 +199,7 @@ arrow2 = QuasiQuoter {
     where parseMode = E.defaultParseMode{E.extensions=[E.EnableExtension E.Arrows],E.fixities=Just (E.baseFixities)}
 
 --category :: C.Dict (con a) -> [(con a => TExp (a b c) -> (Q (TExp (a b c))))] -> QuasiQuoter
-category :: [Exp -> Q Exp] -> QuasiQuoter
+category :: [Exp -> Q (Maybe Exp)] -> QuasiQuoter
 category rules = QuasiQuoter {
   quoteExp = \input -> case E.parseExpWithMode parseMode input of
       E.ParseOk result -> do
@@ -208,18 +209,17 @@ category rules = QuasiQuoter {
           --let [a,b] = unTypeRule s <$> rules
           --let ruleTs :: Data a => a -> Q a
            --     ruleTs = return `extM` a `extM` b
-          let      r :: Data a => a -> Q a
-                   r = foldl extM return rules
-          res2 <- G.everywhereM r $ cleanNames $ fixity' res
-          res3 <- G.everywhereM r $ cleanNames $ fixity' res2
-          reportWarning $ show res3
+          let
+              r exp = (runMaybeT . msum $ ( MaybeT . fmap cleanNames . flip ($) exp) <$> rules)
+              res2 = transform fixity' $ cleanNames res
+          res3 <- rewriteM r res2
           return res3 >>= arrFixer
       E.ParseFailed l err -> error $ "arrow QuasiQuoter: " ++ show l ++ " " ++ show err
   , quotePat = error "cannot be patterns."
   , quoteDec = error "category: cannot by dec"
   , quoteType = error "cannot be types."
     }
-    where parseMode = E.defaultParseMode{E.extensions=[E.EnableExtension E.Arrows],E.fixities=Just (E.baseFixities)}
+     where parseMode = E.defaultParseMode{E.extensions=[E.EnableExtension E.Arrows],E.fixities=Just (E.baseFixities)}
 
 
  {-

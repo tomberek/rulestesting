@@ -48,6 +48,7 @@ p = [catCCA|
         id -< n
     |]
 
+
 main :: IO ()
 main = do
     --print $ [| fst >>> arr id >>> arr (+1) |] >>= L.rewriteM reifyLaws

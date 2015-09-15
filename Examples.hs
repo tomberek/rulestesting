@@ -57,9 +57,8 @@ line4 = [arrow| proc (x,y) -> do
             id -< z+w
             |]
 
---catCCA = category (Dict :: Dict (ArrowCCA (ASyn m))) cca_ruleset
---catCCA = category $ cca_ruleset ++ category_ruleset
-catCCA = category $ [category_id']
+catCCA = category $ cca_ruleset ++ category_ruleset
+
 {-
 line5 :: ArrowCCA a => a (Maybe c) c
 line5 = [arrow| proc (Just a) -> id -< a |]

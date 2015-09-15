@@ -17,7 +17,8 @@ module Language.Haskell.TH.Utilities(
     tuple, tupleP, tuplizer,
     times,
     hsQuote, hsSplice, quoteArr, quoteInit,     -- for CCA
-    rule,rule2,promote,promote',ifM,areExpAEq,expEqual,unTypeRule,into,RuleT --for id detection
+    rule,rule2,promote,promote',ifM,areExpAEq,expEqual,
+    unTypeRule,into,RuleT,RuleE
 ) where
 
 import           Data.Generics
@@ -37,65 +38,14 @@ import Language.Haskell.Meta
 import Language.Haskell.Meta.Utils
 import Control.Applicative
 import qualified Data.Constraint as C
+import Control.Monad
 
-
-into = Just
+into :: Functor f => f a -> f (Maybe a)
+into = fmap Just
 -- | Needs a free proxy to untyp TExp
 -- Usage: (d3 (Id :: ASyn m a b) cca_rule1) :: Exp -> Q Exp
-unTypeRule :: C.Dict (ctx a) -> (ctx a => TH.TExp (a b c) -> (Q (TH.TExp (a b c)))) -> TH.Exp -> (Q TH.Exp)
-unTypeRule C.Dict rule texp = TH.unTypeQ <$> rule $ TH.TExp texp
-
--- | 'dataToExpQ' converts a value to a 'Q Exp' representation of the same
--- value. It takes a function to handle type-specific cases.
-{-
-dataToExpQ'  ::  Data a
-             =>  (forall b . Data b => b -> Q (Maybe TH.Exp))
-             ->  a
-             ->  Q TH.Exp
-dataToExpQ' = dataToQa' TH.conE TH.litE (foldl TH.appE)
-
-dataToQa'  ::  forall a k q. Data a
-                            =>  (TH.Name -> k)
-                            ->  (TH.Lit -> Q q)
-                            ->  (k -> [Q q] -> Q q)
-                            ->  (forall b . Data b => b -> Q (Maybe q))
-                            ->  a
-                            ->  Q q
-dataToQa' mkCon mkLit appCon antiQ t = do
-    anti <- antiQ t
-    case anti of
-      Nothing ->
-          case constrRep constr of
-            AlgConstr _ ->
-                appCon (mkCon conName) conArgs
-              where
-                conName :: TH.Name
-                conName =
-                    case showConstr constr of
-                            "(:)"       -> TH.Name (mkOccName ":") (TH.NameG TH.DataName (mkPkgName "ghc-prim") (mkModName "GHC.Types"))
-                            con@"[]"    -> TH.Name (mkOccName con) (TH.NameG TH.DataName (mkPkgName "ghc-prim") (mkModName "GHC.Types"))
-                            con@('(':_) -> TH.Name (mkOccName con) (TH.NameG TH.DataName (mkPkgName "ghc-prim") (mkModName "GHC.Tuple"))
-                            con         -> mkNameG_d (tyConPackage tycon)
-                                               (tyConModule tycon)
-                                               con
-                  where
-                    tycon :: TyCon
-                    tycon = (typeRepTyCon . typeOf) t
-
-                conArgs :: [Q q]
-                conArgs = gmapQ (dataToQa' mkCon mkLit appCon antiQ) t
-            IntConstr n ->
-                mkLit $ integerL n
-            FloatConstr n ->
-                mkLit $ rationalL n
-            CharConstr c ->
-                mkLit $ charL c
-        where
-          constr :: Constr
-          constr = toConstr t
-
-      Just y -> return y
--}
+unTypeRule :: C.Dict (ctx a) -> (ctx a => TH.TExp (a b c) -> Q (Maybe (TH.TExp (a b c)))) -> TH.Exp -> Q (Maybe TH.Exp)
+unTypeRule C.Dict rule texp = fmap TH.unType <$> rule (TH.TExp texp)
 
 tuplizer :: a -> ([a]->a) -> [a] -> a
 tuplizer u _ [] = u
@@ -192,14 +142,19 @@ updatePat (TH.VarP (Name s@[t])) = Just $
         >>= return. TH.AsP (Name $ [t] ++ "'_")
 
 -- | Cannot cope with un-handled fixities, ensure all rules have clearly resolved fixity
-updateFixity :: TH.Exp -> TH.Exp
-updateFixity (TH.UInfixE l o r) = TH.InfixE (Just l) o (Just r)
-updateFixity n = n
+updateFixity :: TH.Exp -> Maybe TH.Exp
+updateFixity (TH.UInfixE l o r) = Just $ TH.InfixE (Just l) o (Just r)
+updateFixity n = Nothing
+
+-- | Cannot cope with un-handled fixities, ensure all rules have clearly resolved fixity
+updateFixity' :: TH.Exp -> Maybe TH.Exp
+updateFixity' (TH.InfixE (Just l) o (Just r)) = Just $ TH.UInfixE l o r
+updateFixity' n = Nothing
 
 -- | Remove parens, how does this play with fixities and operators? Superfluous?
-updateParens :: TH.Exp -> TH.Exp
-updateParens (TH.ParensE e) = e
-updateParens n =n
+updateParens :: TH.Exp -> Maybe TH.Exp
+updateParens (TH.ParensE e) = Just e
+updateParens n = Nothing
 --updatePat n = error $ show n
 --updatePat _ = Nothing
 rule2 :: TH.QuasiQuoter
@@ -209,14 +164,15 @@ rule2 = rule{
              Left c -> error $ "Exp: cannot parse rule pattern: " ++ c ++ " " ++ input
          , TH.quotePat = \input -> case parseExp input of
              Right b -> do
-                 let b' = everywhere (id `extT` updateFixity `extT` updateParens) b
+                 let b' = L.rewrite (orElse <$> updateFixity' <*>updateParens) b
                  out <- [p| TH.TExp $(TH.dataToPatQ (const Nothing `extQ` updateNameTP `extQ` updatePat) b') |]
-                 TH.reportWarning $ show out
+                 --TH.reportWarning $ show out
                  return out
              Left c -> error $ "cannot parse rule pattern: " ++ c ++ " " ++ input
               }
 
-type RuleT ctx a b c = ctx a => TH.TExp (a b c) -> Q (TH.TExp (a b c))
+type RuleT ctx a b c = ctx a => TH.TExp (a b c) -> Q (Maybe (TH.TExp (a b c)))
+type RuleE = TH.Exp -> Q (Maybe TH.Exp)
 
 {-
 dataToTExpQ :: Data a => (forall b. Data b => b -> Maybe (TH.Q (TH.TExp a))) -> TH.TExp a -> TH.Q (TH.TExp a)
