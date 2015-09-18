@@ -23,7 +23,7 @@ module Main where
 
 import           Prelude hiding (id,(.))
 import           Examples
-import           Control.Arrow.TH
+import           Control.Arrow.CCA.Free
 import Language.Haskell.Meta.Utils
 import Language.Haskell.TH
 import Language.Haskell.TH.Utilities
@@ -37,17 +37,15 @@ import qualified Control.Lens as L
 import Data.Typeable
 import Control.Arrow(arr)
 import Data.Generics
-import Control.Arrow.CCA
+import Control.Arrow.CCA.NoQ
 import Control.Arrow.CCA.Rules
 deriving instance Show NameFlavour
 deriving instance Show NameSpace
-
 p :: ArrowCCA a => a b b
 p = [catCCA|
     proc n -> do
         id -< n
     |]
-
 
 main :: IO ()
 main = do

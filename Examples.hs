@@ -12,7 +12,7 @@
 {-# LANGUAGE LambdaCase    #-}
 {-# LANGUAGE AllowAmbiguousTypes    #-}
 module Examples where
-import           Control.Arrow.CCA
+import           Control.Arrow.CCA.NoQ
 import           Control.Arrow.TH
 import           Control.Arrow hiding ((&&&),(***),first,second)
 import           Control.Concurrent          (threadDelay)
@@ -52,11 +52,9 @@ line3 = [arrow| proc (x,y) -> do
 ---}
 line4 :: (Weaken (,) a,Contract (,) a,Category a,ArrowCCA a) => a (Int,Int) Int
 line4 = [catCCA| proc (x,y) -> do
-             z <- arr(*2) -< x+1
-             w <- id -< y
-             id -< z+w
+             z <- arr (*2) -< x+1
+             id -< (y+z)
              |]
-
 
 {-
 line5 :: ArrowCCA a => a (Maybe c) c

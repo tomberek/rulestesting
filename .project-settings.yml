@@ -16,6 +16,7 @@ extra-packages: ! 'Hackage: th-alpha 0.2.0.2
 
 '
 ghc-args:
+- -fdefer-type-errors
 - -fenable-rewrite-rules
 excluded-modules:
 - Arrow.hs

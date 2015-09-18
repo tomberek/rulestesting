@@ -5,7 +5,6 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE QuasiQuotes #-}
 module Control.Arrow.CCA.Rules where
-import Control.Arrow.CCA
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax
 import Language.Haskell.TH.Utilities
@@ -16,16 +15,14 @@ import Control.Category.Structural
 import Control.Category
 import Prelude hiding (id,(.))
 import qualified Data.Constraint as C
-import Control.Arrow.TH (category)
 import Control.Category.Rules (category_ruleset)
-import Control.Arrow.TH (ASyn)
+--import Control.Arrow.TH (ASyn)
+--import Control.Arrow.TH (category)
+--import Control.Arrow.CCA
+import Control.Arrow.CCA.Free
+import Control.Arrow.CCA.NoQ
 
-catCCA = category $ cca_ruleset ++ category_ruleset
-
-cca_ruleset :: [Exp -> Q (Maybe Exp)]
-cca_ruleset = let a = C.Dict :: C.Dict (ArrowCCA (ASyn m))
-                  demote = unTypeRule a
-              in [demote cca_rulesetT,demote cca_rulesetT2,demote cca_rulesetT3]
+catCCA = category $ [] --cca_ruleset ++ category_ruleset
 
 cca_rulesetT :: RuleT ArrowCCA a b c
 cca_rulesetT [rule2| arr f >>> arr g |] = into [||  (arr ( $$g . $$f)) ||]

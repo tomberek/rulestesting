@@ -25,7 +25,7 @@ Stability   :  unstable
 Portability :  TemplateHaskell,QuasiQuotes,ViewPatterns
 
 -}
-module Control.Arrow.TH (
+module Control.Arrow.CCA.Free (
     arrow2,printCCA,into,buildA,
     cleanNames,parseMode,arrFixer,fixity,
     AExp(..),ASyn(..),fromAExp,findM,
@@ -41,7 +41,7 @@ import Language.Haskell.TH.Syntax
 import Language.Haskell.TH.Quote
 import Language.Haskell.Meta.Utils
 import Language.Haskell.Meta.Parse
-import Control.Arrow.CCA
+import Control.Arrow.CCA.NoQ
 import Control.Arrow hiding ((&&&),(***),first,second)
 import qualified Control.Category as Q
 import Data.List (filter,partition,foldr,mapAccumL,findIndices,elemIndex,(\\),(!!),delete,nub,find)
@@ -115,7 +115,7 @@ category rules = QuasiQuoter {
               r exp = (runMaybeT . msum $ ( MaybeT . fmap cleanNames . flip ($) exp) <$> rules)
               res2 = transform fixity' $ cleanNames res
           res3 <- rewriteM r res2
-          return res3 >>= arrFixer'
+          return res3 >>= arrFixer
       E.ParseFailed l err -> error $ "arrow QuasiQuoter: " ++ show l ++ " " ++ show err
   , quotePat = error "cannot be patterns."
   , quoteDec = error "category: cannot by dec"
@@ -127,23 +127,6 @@ category rules = QuasiQuoter {
 -- the versions that have their arguments lifted to TH.
 arrFixer :: Exp -> ExpQ
 arrFixer = rewriteM arg
-    where
-        arg (AppE (VarE (Name (OccName "arr") _)) e) =
-            fmap Just [| arr' (returnQ $(lift e)) $(returnQ e) |]
-        arg (AppE (VarE (Name (OccName "arrM") _)) e) =
-            fmap Just [| arrM' (returnQ $(lift e)) $(returnQ e) |]
-        arg (AppE (VarE (Name (OccName "delay") _)) e) =
-            fmap Just [| delay' (returnQ $(lift e)) $(returnQ e) |]
-        arg (VarE (Name (OccName "returnA") _)) =
-            fmap Just [| arr' (returnQ $([| Q.id |] >>= lift)) Q.id |]
-        arg (AppE (ConE (Name (OccName "Lift") _)) e) =   -- Huh?
-            fmap Just $ returnQ e
-        arg (AppE (VarE (Name (OccName "terminate") _)) e) =
-            fmap Just [| terminate' (returnQ $(lift e)) $(returnQ e) |]
-        arg _ = return Nothing
-
-arrFixer' :: Exp -> ExpQ
-arrFixer' = rewriteM arg
     where
         arg (AppE (VarE (Name (OccName "arr") _)) e) =
             fmap Just [| arr' ($(lift e)) $(returnQ e) |]
@@ -159,21 +142,31 @@ arrFixer' = rewriteM arg
             fmap Just [| terminate' ($(lift e)) $(returnQ e) |]
         arg _ = return Nothing
 
+
 buildA :: E.Exp -> ExpQ
 buildA (E.Proc _ pat exp) = buildB pat exp
-buildA exp = return $ toExp exp -- only process Arrow proc notation
+buildA exp = return $ toExp exp
 
 pattern P p <- (toPat -> p)
 pattern E e <- (toExp -> e)
 pattern R r <- (return -> r)
-pattern RP p <- (return . toPat -> p)
-pattern RE e <- (return . toExp -> e)
 
 buildB :: E.Pat -> E.Exp -> ExpQ
-buildB pat (E.Do exps) = snd $ head final
+buildB pat@(E.PTuple E.Boxed [a,b]) (E.Do exps) = do
+    reportWarning "split proc pattern"
+    snd $ head final
+    where rest = buildC (init exps) [(a,[|fst|]),(b,[|snd|]) ]
+          final = buildC [last exps] rest
+buildB pat (E.Do exps) = do
+    reportWarning "un-split proc pattern"
+    snd $ head final
     where rest = buildC (init exps) [(pat,[|id|])]
           final = buildC [last exps] rest
-buildB p (E.LeftArrApp (return . toExp -> arrow) e) | otherwise = [| $(buildArrow p e) >>> $arrow |]
+          {-
+buildB p (E.LeftArrApp (return . toExp -> arrow) e)
+         -- | promote (toPat p) == (toExp e) = [| $arrow |] -- Id arrow law
+         | otherwise = [| ( $(buildArrow p e) )  >>> ( $arrow )|]
+          -}
 buildB a b = error $ "Not supported: " ++ show (a,b)
 
 buildC :: [E.Stmt] -> [(E.Pat,ExpQ)] -> [(E.Pat,ExpQ)]
@@ -182,7 +175,7 @@ buildC [] exps = exps
 buildC [stmt] [(pat,exp)] = [(pat',[| ( $exp ) >>> ( $exp' ) |])]
     where (pat',exp') = buildD pat stmt
 -}
-buildC stmts exps = if null goals then error "cannot make progress" else buildC rest (newExps ++ exps)
+buildC stmts exps = if null newExps then exps else buildC rest (newExps ++ exps)
     where (goals,rest) = Data.List.partition (all (flip elem $ freeVars $ fst <$> exps) . freeVars) stmts
           sources :: [(E.Stmt,[(E.Pat,ExpQ)])] -- statements that can be built with their dependencies
           sources = zip goals $ sourceGetter <$> goals
@@ -196,22 +189,30 @@ expr1 *:* expr2 = infixE (Just expr1) (varE $ mkName "***") (Just expr2)
 expr1 &:& expr2 = infixE (Just expr1) (varE $ mkName "&&&") (Just expr2)
 
 buildD' :: E.Stmt -> [(E.Pat,ExpQ)] -> (E.Pat,ExpQ)
-buildD' stmt s = (out,[| $(foldl1 (&:&) (snd <$> s)) >>> $out2 |]) -- NOTE: Assumes &&& is available, fix with weakening laws?
-    where (out,out2) = buildD (tuplizer E.PWildCard (E.PTuple E.Boxed) $ fst <$> s) stmt
+buildD' stmt s = (out,[| $(fixedTuple)  >>> $(returnQ $ toExp arrow) |]) -- NOTE: Assumes &&& is available, fix with weakening laws?
+    where --(out,out2) = buildD (tuplizer E.PWildCard (E.PTuple E.Boxed) $ fst <$> s) stmt
+          (out,fixedTuple) = fixTuple (snd <$> s) origp (tuplizer E.PWildCard (E.PTuple E.Boxed) ( fst <$> s)) exp
+          (arrow,exp,origp) = case stmt of
+                               (E.Qualifier (E.LeftArrApp arrows f)) -> (arrows,f,E.PWildCard)
+                               (E.Generator _ p (E.LeftArrApp arrows f)) -> (arrows,f,p)
+--buildD' stmt s = (out,[| $(foldl1 (&:&) (snd <$> s)) >>> $out2 |]) -- NOTE: Assumes &&& is available, fix with weakening laws?
+--      where (out,out2) = buildD (tuplizer E.PWildCard (E.PTuple E.Boxed) $ fst <$> s) stmt
 
+{-
 buildD :: E.Pat -> E.Stmt -> (E.Pat,ExpQ)
-buildD p (E.Qualifier      (E.LeftArrApp (return . toExp -> a) e )) = (E.PWildCard,[| $(buildArrow p e) >>> $a |])
-buildD p (E.Generator _ p3 (E.LeftArrApp (return . toExp -> a) e )) = (p3,         [| $(buildArrow p e) >>> $a |])
+buildD p (E.Qualifier      (E.LeftArrApp (return . toExp -> a) e )) = (E.PWildCard,[| ( $(buildArrow p e) ) >>>  ($a )|])
+buildD p (E.Generator _ p3 (E.LeftArrApp (return . toExp -> a) e )) = (p3,         [| ( $(buildArrow p e) ) >>> ($a )|])
 
 buildArrow :: E.Pat -> E.Exp -> ExpQ
 buildArrow E.PWildCard e= [| terminate $(return $ toExp e) |]
 buildArrow p e | not $ any (flip elem $ freeVars p) (freeVars e)= [| terminate $(return $ toExp e) |]
-               | otherwise = [| arr (\ $(return $ toPat p) ->
+               | otherwise = [| ( (arr (\ $(return $ toPat p) ->
                    $(promote <$> intermediate p))
                    >>> arr (\ $(intermediate  p) -> $(promote <$> intermediate e))
-               >>> arr (\ $(intermediate e) -> $(return $ toExp e)) |] -- >>= return . error .show
+               >>> arr (\ $(intermediate e) -> $(return $ toExp e)) ) )|] -- >>= return . error .show
                where
                    intermediate vars = return $ tuplizer (TupP []) TupP <$> map (VarP . toName) $ freeVars vars
+-}
 
                                     {-
 process ps (E.Proc _ b c) = Debug.Trace.trace (show b) $ process (ProcN 0 b (E.List []) [|Q.id|] : ps) c
@@ -224,17 +225,17 @@ process ps (E.Do statements) = (buildGr allNodes , fromAscList $ zip (view i <$>
 -- =======================
 -- We use AExp to syntactically represent an arrow for normalization purposes.
 data AExp
-  = Arr ExpQ
+  = Arr Exp
   | First AExp
   | AExp :>>> AExp
-  | ArrM ExpQ -- added to allow arrows with side effects
+  | ArrM Exp -- added to allow arrows with side effects
   | AExp :*** AExp -- added to prevent premature optimization? or to allow it?
   | AExp :&&& AExp -- added to prevent premature optimization? or to allow it?
   | Loop AExp       -- simple loop, needed for rec?
-  | LoopD ExpQ ExpQ -- loop with delayed feedback
-  | Delay ExpQ
+  | LoopD Exp Exp -- loop with delayed feedback
+  | Delay Exp
   | Lft AExp -- arrow choice
-  | Lift ExpQ -- arrow lifted
+  | Lift Exp -- arrow lifted
 
   | Id -- This and below added for Symetric Cartesian (not monoidal)
   -- Cartesian
@@ -252,23 +253,14 @@ data AExp
   | Idl
   | Coidl
   | Coidr
-  | Terminate ExpQ
-  deriving (Typeable)
+  | Terminate Exp
+  deriving (Typeable,Data)
   {- Closed, not needed
   | Apply -- (f,a) = f a   arr (\(f,a)->f a)
   | Curry
   | Uncurry
   -}
-
-instance L.Plated AExp where
-    plate f (First e) = First <$> f e
-    plate f (Second e) = Second <$> f e
-    plate f (a :>>> b) = (:>>>) <$> f a <*> f b
-    plate f (a :*** b) = (:***) <$> f a <*> f b
-    plate f (a :&&& b) = (:&&&) <$> f a <*> f b
-    plate f (Loop e) = Loop <$> f e
-    plate f (Lft e) = Lft <$> f e
-    plate _ e = pure e
+instance L.Plated AExp
 
 areExpAEq' :: Q Exp -> Q Exp -> Q Bool
 areExpAEq' f g = do
@@ -291,22 +283,22 @@ fixity' = G.everywhere (G.mkT expf)
 
 -- | Used to measure progress for normalization using rewriteM
 eqM :: AExp -> AExp -> Q Bool
-eqM (Arr f) (Arr g) = areExpAEq' f g
+eqM (Arr f) (Arr g) = expEqual f g
 eqM (First f) (First g) = eqM f g
 eqM (Second f) (Second g) = eqM f g
 eqM (f :>>> g) (h :>>> i) = (&&) <$> eqM f h <*> eqM g i
-eqM (ArrM f) (ArrM g) = areExpAEq' f g
+eqM (ArrM f) (ArrM g) = expEqual f g
 eqM (f :*** g) (h :*** i) = (&&) <$> eqM f h <*> eqM g i
 eqM (f :&&& g) (h :&&& i) = (&&) <$> eqM f h <*> eqM g i
 eqM (Loop f) (Loop g) = eqM f g
-eqM (LoopD f g) (LoopD h i) = (&&) <$> areExpAEq' f h <*> areExpAEq' g i
-eqM (Delay f) (Delay g) = areExpAEq' f g
+eqM (LoopD f g) (LoopD h i) = (&&) <$> expEqual f h <*> expEqual g i
+eqM (Delay f) (Delay g) = expEqual f g
 eqM (Lft f) (Lft g) = eqM f g
 eqM Id Id = return True
 eqM Diag Diag = return True
 eqM Fst Fst = return True
 eqM Snd Snd = return True
-eqM (Lift f) (Lift g) = areExpAEq' f g
+eqM (Lift f) (Lift g) = expEqual f g
 eqM Associate Associate = return True
 eqM Disassociate Disassociate = return True
 eqM Swap Swap = return True
@@ -314,7 +306,7 @@ eqM Coidl Coidl = return True
 eqM Coidr Coidr = return True
 eqM Idr Idr = return True
 eqM Idl Idl = return True
-eqM (Terminate a) (Terminate b) = areExpAEq' a b
+eqM (Terminate a) (Terminate b) = expEqual a b
 eqM _ _ = return False
 
 instance Eq AExp where
@@ -419,9 +411,11 @@ instance ArrowCCA (ASyn m) where
 --'+++' is also redefined here for completeness.
 instance Monad m => ArrowChoice (ASyn m) where
     left (AExp f) = AExp (Lft f)
-    right f = arr' [| mirror |] mirror >>> left f >>> arr' [| mirror |] mirror
+    --right f = arr' [| mirror |] mirror >>> left f >>> arr' [| mirror |] mirror
+    right f = arr mirror >>> left f >>> arr mirror
     f +++ g = left f >>> right g
-    f ||| g = f +++ g >>> arr' [| untag |] untag
+    --f ||| g = f +++ g >>> arr' [| untag |] untag
+    f ||| g = f +++ g >>> arr untag
 mirror :: Either b a -> Either a b
 mirror (Left x) = Right x
 mirror (Right y) = Left y
@@ -446,8 +440,8 @@ rules = [
         , ([| \(a,b) -> (a,b)|],Id)
         , ([| \(a,(b,c)) -> (a,(b,c))|],Id)
         , ([| \((a,b),c) -> ((a,b),c)|],Id) -- so far only two levels
-        , ([| \a -> () |],Terminate [|()|])
-        , ([| \a -> ((),()) |],Terminate [|()|] :*** Terminate [|()|])
+        , ([| \a -> () |],Terminate $ TupE [])
+        , ([| \a -> ((),()) |],Terminate (TupE []) :*** Terminate (TupE []))
         , ([| \a -> (a,a)|],Diag)
         , ([| \(a,b) -> a|],Fst)
         , ([| arr fst |],Fst)
@@ -492,19 +486,19 @@ fromAExp Coidr = [| coidr |]
 fromAExp Coidl = [| coidl |]
 fromAExp Idl = [| idl |]
 fromAExp Idr = [| idr |]
-fromAExp (Terminate a) = [| terminate $a |]
+fromAExp (Terminate a) = [| terminate $(returnQ a) |]
 
 -- Should not be arround after second rewrite pass:
-fromAExp (Arr f) = appE [|arr|] f
+fromAExp (Arr f) = appE [|arr|] (returnQ f)
 fromAExp (First f) = appE [|first|] (fromAExp f)
 fromAExp (Second f) = appE [|second|] (fromAExp f)
 fromAExp (f :>>> g) = infixE (Just (fromAExp f)) [|(>>>)|] (Just (fromAExp g))
 fromAExp (Loop f) = appE [|loop|] (fromAExp f)
-fromAExp (LoopD i f) = appE (appE [|loopD|] i) f
-fromAExp (ArrM i) = appE [|arrM|] i
-fromAExp (Delay i) = appE [|delay|] i
+fromAExp (LoopD i f) = appE (appE [|loopD|] (returnQ i)) (returnQ f)
+fromAExp (ArrM i) = appE [|arrM|] (returnQ i)
+fromAExp (Delay i) = appE [|delay|] (returnQ i)
 fromAExp (Lft f) = appE [|left|] (fromAExp f)
-fromAExp (Lift f) = f
+fromAExp (Lift f) = returnQ f
 fromAExp (f :*** g) = infixE (Just (fromAExp f)) [|(***)|] (Just (fromAExp g)) -- Not in original CCA. 2015-TB
 fromAExp (f :&&& g) = infixE (Just (fromAExp f)) [|(&&&)|] (Just (fromAExp g)) -- Not in original CCA. 2015-TB
 

@@ -173,8 +173,9 @@ rule2 = rule{
          , TH.quoteType = error "cannot be types."
                  }
 
-type RuleT ctx a b c = ctx a => TH.TExp (a b c) -> Q (Maybe (TH.TExp (a b c)))
+
 type RuleE = TH.Exp -> Q (Maybe TH.Exp)
+type RuleT a = TH.TExp a -> Q (Maybe (TH.TExp a))
 
 
 

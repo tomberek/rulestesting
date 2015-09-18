@@ -16,23 +16,48 @@ import Control.Arrow.CCA
 import           Control.Category
 import           Prelude             hiding (id, (.),fst,snd)
 import           Control.Arrow hiding (first,second,(***),(&&&))
+import Language.Haskell.TH (reportWarning,mkName)
+import qualified Language.Haskell.TH as TH
+import Language.Haskell.TH.Lib
 
 pattern P a = PVar a
 pattern E a = Var a
 pattern TP a rest = PTuple Boxed [a,rest]
 pattern EP a rest = Tuple Boxed [a,rest]
 
-fixTuple :: Pat -> Exp -> ExpQ
---fixTuple pat@(PApp a [rest]) (App (Con b) rest2) | toName a == toName b = fixTuple rest rest2
-fixTuple PWildCard exp = [| arr (\_ -> $(return $ toExp exp)) |]
-fixTuple pat@(P a) (EP b rest) = [| $(fixTuple pat b) &&& $(fixTuple pat rest) |]                                                     -- diag
-fixTuple (P a) (E b) | toName a == toName b                 = [|id|]                                                                  -- id
-                     | otherwise                            = [| arr (\ $(return $ toPat $ PWildCard) -> $(return $ toExp $ E b)) |]  -- arr
-fixTuple pat@(TP a rest@(fmap toName . freeVars -> restFree)) (EP b rest2@(fmap toName . freeVars -> rest2Free))
-          |  all (flip elem (toName <$> freeVars a)) (toName <$> freeVars b)
-              && (all (flip elem restFree) rest2Free)       = [| $(fixTuple a b) *** $(fixTuple rest rest2) |]                        -- ***
-          | otherwise                                       = [| swap >>> $(fixTuple (TP rest a) (EP b rest2)) |]      -- swap
-fixTuple pat@(TP a rest) (E b)
-          | elem (toName b) (toName <$> freeVars a)         = [| fst >>> $(fixTuple a (E b)) |]                           -- fst
-          | otherwise                                       = [| swap >>> $(fixTuple (TP rest a) (E b)) |]             -- swap
-fixTuple pat b                                              = [| arr (\ $(return $ toPat pat) -> $(return $ toExp b)) |] -- can't "categorize"
+fixTuple :: [ExpQ] -> Pat -> Pat -> Exp -> (Pat,ExpQ)
+--fixTuple [] origp pat exp = (origp,[| arr (\ $(return $ toPat pat) -> $(return $ toExp exp)) |])
+--fixTuple es origp pat@(PApp a [rest]) (App (Con b) rest2) | toName a == toName b = fixTuple es origp rest rest2 -- removes application of constructor
+--fixTuple es origp PWildCard exp = (origp,[| ( $(foldl1 (&:&) es) ) >>> arr (\_ -> $(return $ toExp exp)) |])
+--fixTuple es pat@(P a) (EP b rest) = [| $(fixTuple es pat b) &&& $(fixTuple es pat rest) |]                                                     -- diag
+                        {-
+fixTuple es (P a) (E b) | toName a == toName b                 = [| ($(foldl1 (&:&) es)) >>> id|]                                                                  -- id
+                        | otherwise                            = [| ($(foldl1 (&:&) es)) >>> arr (\ $(return $ toPat $ P a) -> $(return $ toExp $ E b)) |]  -- arr
+fixTuple [e1,e2] pat@(TP a rest@(fmap toName . freeVars -> restFree)) (EP b rest2@(fmap toName . freeVars -> rest2Free))        -- ***
+                  |  all (flip elem (toName <$> freeVars a)) (toName <$> freeVars b)
+                      && (all (flip elem restFree) rest2Free)       = do
+                          reportWarning $ "success: " ++ show rest
+                          [| $(fixTuple [e1] a b) *** $(fixTuple [e2] rest rest2) |]                        -- ***
+                  | otherwise                                       = do
+                          reportWarning $ "failed: " ++ show rest
+                          [| $(fixTuple [e2] a b) *** $(fixTuple [e1] rest rest2) |]                        -- ***
+fixTuple [e1,e2] pat@(TP a rest) b
+                  | all ( flip elem (toName <$> freeVars a)) (toName <$> freeVars b) = do
+                      reportWarning $ "weakeneing: " ++ show pat
+                      [| $(fixTuple [e1] a b) |]                           -- fst
+                  | all ( flip elem (toName <$> freeVars rest)) (toName <$> freeVars b) = do
+                      reportWarning $ "weakeneing: " ++ show pat
+                      [| $(fixTuple [e2] rest b) |]                           -- snd (or something)
+                  | otherwise                                       = do
+                      reportWarning $ "cant fix for vars: " ++ (show $ (pat,freeVars b))
+                      [| $(foldl1 (&:&) [e1,e2] ) >>> arr (\ $(return $ toPat pat) -> $(return $ toExp b)) |] -- can't "categorize"
+                        -}
+fixTuple es origp pat b                                              = (origp,do
+    --reportWarning $ "var: " ++ (show (freeVars pat,freeVars b,show es,show origp))
+    --reportWarning $ "exps: " ++ (show $ (pat,b))
+    [|  $(foldl1 (&:&) (fmap TH.ParensE <$> es)) >>> arr (\ $(return $ toPat pat) -> $(return $ toExp b))  |]) -- can't "categorize"
+
+(&:&) :: ExpQ -> ExpQ -> ExpQ
+expr1 &:& expr2 = infixE (Just expr1) (varE $ mkName "&&&") (Just expr2)
+(*:*) :: ExpQ -> ExpQ -> ExpQ
+expr1 *:* expr2 = infixE (Just expr1) (varE $ mkName "***") (Just expr2)
