@@ -175,7 +175,7 @@ rule2 = rule{
 
 
 type RuleE = TH.Exp -> Q (Maybe TH.Exp)
-type RuleT a = TH.TExp a -> Q (Maybe (TH.TExp a))
+type RuleT ctx a = ctx => TH.TExp a -> Q (Maybe (TH.TExp a))
 
 
 

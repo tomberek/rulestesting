@@ -27,10 +27,10 @@ pattern EP a rest = Tuple Boxed [a,rest]
 
 fixTuple :: [ExpQ] -> Pat -> Pat -> Exp -> (Pat,ExpQ)
 --fixTuple [] origp pat exp = (origp,[| arr (\ $(return $ toPat pat) -> $(return $ toExp exp)) |])
---fixTuple es origp pat@(PApp a [rest]) (App (Con b) rest2) | toName a == toName b = fixTuple es origp rest rest2 -- removes application of constructor
---fixTuple es origp PWildCard exp = (origp,[| ( $(foldl1 (&:&) es) ) >>> arr (\_ -> $(return $ toExp exp)) |])
---fixTuple es pat@(P a) (EP b rest) = [| $(fixTuple es pat b) &&& $(fixTuple es pat rest) |]                                                     -- diag
-                        {-
+fixTuple es origp pat@(PApp a [rest]) (App (Con b) rest2) | toName a == toName b = fixTuple es origp rest rest2 -- removes application of constructor
+fixTuple es origp PWildCard exp = (origp,[| ( $(foldl1 (&:&) es) ) >>> arr (\_ -> $(return $ toExp exp)) |])
+fixTuple es origp pat@(P a) (EP b rest) = (origp, [| $(fixTuple es origp pat b) &&& $(fixTuple es origp pat rest) |] )  -- diag
+                            {-
 fixTuple es (P a) (E b) | toName a == toName b                 = [| ($(foldl1 (&:&) es)) >>> id|]                                                                  -- id
                         | otherwise                            = [| ($(foldl1 (&:&) es)) >>> arr (\ $(return $ toPat $ P a) -> $(return $ toExp $ E b)) |]  -- arr
 fixTuple [e1,e2] pat@(TP a rest@(fmap toName . freeVars -> restFree)) (EP b rest2@(fmap toName . freeVars -> rest2Free))        -- ***

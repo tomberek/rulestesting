@@ -24,7 +24,7 @@ import Control.Arrow.CCA.NoQ
 
 catCCA = category $ [] --cca_ruleset ++ category_ruleset
 
-cca_rulesetT :: RuleT ArrowCCA a b c
+cca_rulesetT :: RuleT (ArrowCCA a) (a b c)
 cca_rulesetT [rule2| arr f >>> arr g |] = into [||  (arr ( $$g . $$f)) ||]
 cca_rulesetT [rule2| arr f >>> loopD i g |]    = into [|| loopD $$i ( $$g . ($$f *** id) ) ||]
 cca_rulesetT [rule2| loopD i f >>> arr g |]    = into [|| loopD $$i ( ($$g *** id) . $$f ) ||]
@@ -33,12 +33,12 @@ cca_rulesetT [rule2| loopD i f >>> loopD j g |]= into [|| loopD ($$i,$$j) ( asso
 cca_rulesetT [rule2| loop (loopD i f) |]       = into [|| loopD $$i (trace (juggle . $$f . juggle)) ||]
 cca_rulesetT a =  return Nothing
 
-cca_rulesetT2 :: RuleT ArrowCCA a (b,b1) (c,b1)
+cca_rulesetT2 :: RuleT (ArrowCCA a) (a (b,b1) (c,b1))
 cca_rulesetT2 [rule2| first (arr f) |]    = into [|| arr ( $$f *** id) ||]
 cca_rulesetT2 [rule2| first (loopD i f) |]      = into [|| loopD $$i (juggle . ($$f *** id) . juggle) ||]
 cca_rulesetT2 a = return Nothing
 
-cca_rulesetT3 :: RuleT ArrowCCA a (b,c) (b,c)
+cca_rulesetT3 :: RuleT (ArrowCCA a) (a (b,c) (b,c))
 cca_rulesetT3 [rule2| delay i |]                = into [|| loopD $$i swap ||]
 cca_rulesetT3 a = return Nothing
 

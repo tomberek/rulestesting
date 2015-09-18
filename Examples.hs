@@ -53,7 +53,7 @@ line3 = [arrow| proc (x,y) -> do
 line4 :: (Weaken (,) a,Contract (,) a,Category a,ArrowCCA a) => a (Int,Int) Int
 line4 = [catCCA| proc (x,y) -> do
              z <- arr (*2) -< x+1
-             id -< (y+z)
+             id -< (z+y)
              |]
 
 {-
