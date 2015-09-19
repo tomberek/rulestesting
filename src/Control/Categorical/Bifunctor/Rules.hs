@@ -3,7 +3,8 @@
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE QuasiQuotes #-}
-module Control.Category.Rules where
+module Control.Categorical.Bifunctor.Rules where
+
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax
 import Language.Haskell.TH.Utilities
@@ -15,14 +16,16 @@ import Control.Category
 import Prelude hiding (id,(.))
 import qualified Data.Constraint as C
 import Control.Arrow.CCA.Free
+import Unsafe.Coerce
+import Data.Proxy
 --import Control.Arrow.TH (ASyn)
 
-category_ruleset :: [Exp -> Q (Maybe Exp)]
-category_ruleset = let a = C.Dict :: C.Dict (Category (->))
-                       demote = unTypeRule a
-                  in [demote category_id_arr,demote category_id,demote category_leftAssoc]
-
 {-
+bifunctor_ruleset :: [Exp -> Q (Maybe Exp)]
+bifunctor_ruleset = let a = C.Dict :: C.Dict (Arrow (ASyn m))
+               demote = unTypeRule a
+          in [demote category_id_arr,demote category_id,demote category_leftAssoc]
+
                                                         , ([| \(a,b) -> (a,b)|],Id)
                                                         , ([| \(a,(b,c)) -> (a,(b,c))|],Id)
                                                         , ([| \((a,b),c) -> ((a,b),c)|],Id) -- so far only two levels
@@ -35,7 +38,8 @@ category_id_arr [rule2| arr id |] = into [|| id ||]
 category_id_arr [rule2| returnA |] = into [|| id ||]
 category_id_arr a = return Nothing
 
-category_id_arr' = unTypeRule (C.Dict :: C.Dict (Arrow (ASyn m))) category_id_arr
+category_id_arr' = unTypeRule (C.Dict::C.Dict (Category (->))) category_id_arr
+
 
 category_id :: RuleT (Category a) (a b c)
 category_id [rule2| f >>> id |] = into [|| $$f ||]

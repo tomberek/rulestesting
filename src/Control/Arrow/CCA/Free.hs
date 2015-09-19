@@ -152,11 +152,6 @@ pattern E e <- (toExp -> e)
 pattern R r <- (return -> r)
 
 buildB :: E.Pat -> E.Exp -> ExpQ
-buildB pat@(E.PTuple E.Boxed [a,b]) (E.Do exps) = do
-    reportWarning "split proc pattern"
-    snd $ head final
-    where rest = buildC (init exps) [(a,[|fst|]),(b,[|snd|]) ]
-          final = buildC [last exps] rest
 buildB pat (E.Do exps) = do
     reportWarning "un-split proc pattern"
     snd $ head final
@@ -189,9 +184,9 @@ expr1 *:* expr2 = infixE (Just expr1) (varE $ mkName "***") (Just expr2)
 expr1 &:& expr2 = infixE (Just expr1) (varE $ mkName "&&&") (Just expr2)
 
 buildD' :: E.Stmt -> [(E.Pat,ExpQ)] -> (E.Pat,ExpQ)
-buildD' stmt s = (out,[| $(fixedTuple)  >>> $(returnQ $ toExp arrow) |]) -- NOTE: Assumes &&& is available, fix with weakening laws?
-    where --(out,out2) = buildD (tuplizer E.PWildCard (E.PTuple E.Boxed) $ fst <$> s) stmt
-          (out,fixedTuple) = fixTuple (snd <$> s) origp (tuplizer E.PWildCard (E.PTuple E.Boxed) ( fst <$> s)) exp
+buildD' stmt s = (origp,[| $fixedTuple  >>> $(returnQ $ toExp arrow) |])
+    where
+          fixedTuple = fixTuple (snd <$> s) (tuplizer E.PWildCard (E.PTuple E.Boxed) ( fst <$> s)) exp
           (arrow,exp,origp) = case stmt of
                                (E.Qualifier (E.LeftArrApp arrows f)) -> (arrows,f,E.PWildCard)
                                (E.Generator _ p (E.LeftArrApp arrows f)) -> (arrows,f,p)
@@ -203,15 +198,6 @@ buildD :: E.Pat -> E.Stmt -> (E.Pat,ExpQ)
 buildD p (E.Qualifier      (E.LeftArrApp (return . toExp -> a) e )) = (E.PWildCard,[| ( $(buildArrow p e) ) >>>  ($a )|])
 buildD p (E.Generator _ p3 (E.LeftArrApp (return . toExp -> a) e )) = (p3,         [| ( $(buildArrow p e) ) >>> ($a )|])
 
-buildArrow :: E.Pat -> E.Exp -> ExpQ
-buildArrow E.PWildCard e= [| terminate $(return $ toExp e) |]
-buildArrow p e | not $ any (flip elem $ freeVars p) (freeVars e)= [| terminate $(return $ toExp e) |]
-               | otherwise = [| ( (arr (\ $(return $ toPat p) ->
-                   $(promote <$> intermediate p))
-                   >>> arr (\ $(intermediate  p) -> $(promote <$> intermediate e))
-               >>> arr (\ $(intermediate e) -> $(return $ toExp e)) ) )|] -- >>= return . error .show
-               where
-                   intermediate vars = return $ tuplizer (TupP []) TupP <$> map (VarP . toName) $ freeVars vars
 -}
 
                                     {-
@@ -425,7 +411,7 @@ untag (Right y) = y
 
 -- Pretty printing AExp.
 printCCA :: ASyn m t t1 -> IO ()
-printCCA (AExp x) = runQ (fromAExp x) >>= putStrLn . pprint -- simplify . pprint
+printCCA (AExp x) = runQ (fromAExp x) >>= putStrLn . simplify . pprint -- simplify . pprint
 
 -- Normalization
 -- =============

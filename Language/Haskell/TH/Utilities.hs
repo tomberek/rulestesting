@@ -1,3 +1,6 @@
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE DeriveDataTypeable #-}
@@ -39,13 +42,64 @@ import Language.Haskell.Meta.Utils
 import Control.Applicative
 import qualified Data.Constraint as C
 import Control.Monad
+import Unsafe.Coerce
+import Control.Category
+import Prelude hiding (id,(.))
+import Control.Arrow(Arrow(arr))
+import GHC.Prim (Any)
+import Data.Coerce
 
 into :: Functor f => f a -> f (Maybe a)
 into = fmap Just
 -- | Needs a free proxy to untyp TExp
 -- Usage: (d3 (Id :: ASyn m a b) cca_rule1) :: Exp -> Q Exp
-unTypeRule :: C.Dict (ctx a) -> (ctx a => TH.TExp (a b c) -> Q (Maybe (TH.TExp (a b c)))) -> TH.Exp -> Q (Maybe TH.Exp)
+unTypeRule :: C.Dict (ctx a) -> (ctx a => TH.TExp (a b c) -> Q (Maybe (TH.TExp (a b c)))) -> (TH.Exp -> Q (Maybe TH.Exp))
 unTypeRule C.Dict rule texp = fmap TH.unType <$> rule (TH.TExp texp)
+  where
+    validDict :: C.Dict (Eq ())
+    validDict = C.Dict
+    coercedDict :: C.Dict (ctx a)
+    coercedDict = unsafeCoerce validDict
+
+removeConstraint :: forall c a. Proxy c -> (c => a) -> a
+removeConstraint Proxy x = case coercedDict of
+    C.Dict -> x
+  where
+    validDict :: C.Dict (Eq ())
+    validDict = C.Dict
+    coercedDict :: C.Dict c
+    coercedDict = unsafeCoerce validDict
+
+unTypeR :: Proxy ctx -> (ctx a=> Q (TH.TExp (a b c)) -> Q (TH.TExp (a b c))) -> Q TH.Exp -> Q TH.Exp
+unTypeR i= case (proxy) of
+    (Proxy) -> toUntypedTransform . removeConstraint proxy
+    where proxy :: Proxy (ctx (a :: * -> * -> *):: C.Constraint)
+          proxy = unsafeCoerce Proxy
+
+typedTransform ::  Category a => TH.TExp (a b b) -> Q (Maybe (TH.TExp (a b b)))
+typedTransform _ = Just <$> [|| id ||]
+typedTransform2 ::  forall a b c. Arrow a => TH.TExp (a (b,c) b) -> Q (TH.TExp (a (b,c) b))
+typedTransform2 _ = [|| arr fst ||]
+
+l :: forall a b c ctx. ((ctx a) => TH.TExp (a b c) -> Q (TH.TExp (a b c))) -> TH.Exp -> ( Q (TH.TExp (a b c)),Q (TH.Exp))
+l f g = case coercedDict of
+    C.Dict -> (f $ TH.TExp g,coerce <$> removeConstraint (Proxy :: Proxy (ctx a)) (removeConstraint (Proxy :: Proxy (ctx a)) f $ TH.TExp g))
+  where
+    validDict :: C.Dict (Eq ())
+    validDict = C.Dict
+    coercedDict :: C.Dict (ctx a)
+    coercedDict = unsafeCoerce validDict
+    proxy :: Proxy (ctx (a :: * -> * -> *):: C.Constraint)
+    proxy = unsafeCoerce Proxy
+
+p = unTypeRule (C.Dict :: C.Dict (Category (->))) typedTransform
+
+type family Mult a :: C.Constraint where
+    Mult a = (Category a, Arrow a)
+
+toUntypedTransform :: (Q (TH.TExp a) -> Q (TH.TExp a)) -> Q TH.Exp -> Q TH.Exp
+toUntypedTransform f = TH.unTypeQ . f . TH.unsafeTExpCoerce
+
 
 tuplizer :: a -> ([a]->a) -> [a] -> a
 tuplizer u _ [] = u
@@ -140,6 +194,7 @@ updatePat (TH.VarP (Name s@[t])) = Just $
     [p| (promote -> $( [p| (TH.returnQ -> $(TH.varP $ Name s)) |]
         >>= return . TH.AsP (Name $ s ++ "_"))) |]
         >>= return. TH.AsP (Name $ [t] ++ "'_")
+updatePat _ = Nothing
 
 -- | Cannot cope with un-handled fixities, ensure all rules have clearly resolved fixity
 updateFixity :: TH.Exp -> Maybe TH.Exp

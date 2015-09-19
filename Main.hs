@@ -21,7 +21,7 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 module Main where
 
-import           Prelude hiding (id,(.))
+import           Prelude hiding (id,(.),fst,snd)
 import           Examples
 import           Control.Arrow.CCA.Free
 import Language.Haskell.Meta.Utils
@@ -29,7 +29,7 @@ import Language.Haskell.TH
 import Language.Haskell.TH.Utilities
 import Language.Haskell.TH.Syntax
 import Control.Category
-import Control.Categorical.Bifunctor
+import Control.Categorical.Bifunctor.Rules
 import Control.Applicative
 import qualified Language.Haskell.Exts as E
 import Data.Data
@@ -39,12 +39,13 @@ import Control.Arrow(arr)
 import Data.Generics
 import Control.Arrow.CCA.NoQ
 import Control.Arrow.CCA.Rules
+import Control.Category.Structural (Contract,(&&&),fst,snd)
 deriving instance Show NameFlavour
 deriving instance Show NameSpace
-p :: ArrowCCA a => a b b
+p :: Contract p a => a (p b c) (p b c)
 p = [catCCA|
-    proc n -> do
-        id -< n
+    proc (n,m) -> do
+        id -< (n,m)
     |]
 
 main :: IO ()

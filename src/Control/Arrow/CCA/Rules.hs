@@ -22,7 +22,7 @@ import Control.Category.Rules (category_ruleset)
 import Control.Arrow.CCA.Free
 import Control.Arrow.CCA.NoQ
 
-catCCA = category $ [] --cca_ruleset ++ category_ruleset
+catCCA = category $ category_ruleset
 
 cca_rulesetT :: RuleT (ArrowCCA a) (a b c)
 cca_rulesetT [rule2| arr f >>> arr g |] = into [||  (arr ( $$g . $$f)) ||]
