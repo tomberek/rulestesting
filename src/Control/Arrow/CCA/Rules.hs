@@ -16,30 +16,31 @@ import Control.Category
 import Prelude hiding (id,(.))
 import qualified Data.Constraint as C
 import Control.Category.Rules (category_ruleset)
+import Control.Categorical.Bifunctor.Rules (bifunctor_ruleset)
 --import Control.Arrow.TH (ASyn)
 --import Control.Arrow.TH (category)
 --import Control.Arrow.CCA
 import Control.Arrow.CCA.Free
 import Control.Arrow.CCA.NoQ
 
-catCCA = category $ category_ruleset
+catCCA = category $ category_ruleset ++ bifunctor_ruleset
 
-cca_rulesetT :: RuleT (ArrowCCA a) (a b c)
-cca_rulesetT [rule2| arr f >>> arr g |] = into [||  (arr ( $$g . $$f)) ||]
-cca_rulesetT [rule2| arr f >>> loopD i g |]    = into [|| loopD $$i ( $$g . ($$f *** id) ) ||]
-cca_rulesetT [rule2| loopD i f >>> arr g |]    = into [|| loopD $$i ( ($$g *** id) . $$f ) ||]
-cca_rulesetT [rule2| loopD i f >>> loopD j g |]= into [|| loopD ($$i,$$j) ( associate . juggle
-                                                 . ($$g *** id) . juggle . ($$f *** id) . coassociate) ||]
-cca_rulesetT [rule2| loop (loopD i f) |]       = into [|| loopD $$i (trace (juggle . $$f . juggle)) ||]
+cca_rulesetT :: RuleE
+cca_rulesetT [rule| arr f >>> arr g |] = into [|  (arr ( $g . $f)) |]
+cca_rulesetT [rule| arr f >>> loopD i g |]    = into [| loopD $i ( $g . ($f *** id) ) |]
+cca_rulesetT [rule| loopD i f >>> arr g |]    = into [| loopD $i ( ($g *** id) . $f ) |]
+cca_rulesetT [rule| loopD i f >>> loopD j g |]= into [| loopD ($i,$j) ( associate . juggle
+                                                 . ($g *** id) . juggle . ($f *** id) . coassociate) |]
+cca_rulesetT [rule| loop (loopD i f) |]       = into [| loopD $i (trace (juggle . $f . juggle)) |]
 cca_rulesetT a =  return Nothing
 
-cca_rulesetT2 :: RuleT (ArrowCCA a) (a (b,b1) (c,b1))
-cca_rulesetT2 [rule2| first (arr f) |]    = into [|| arr ( $$f *** id) ||]
-cca_rulesetT2 [rule2| first (loopD i f) |]      = into [|| loopD $$i (juggle . ($$f *** id) . juggle) ||]
+cca_rulesetT2 :: RuleE
+cca_rulesetT2 [rule| first (arr f) |]    = into [| arr ( $f *** id) |]
+cca_rulesetT2 [rule| first (loopD i f) |]      = into [| loopD $i (juggle . ($f *** id) . juggle) |]
 cca_rulesetT2 a = return Nothing
 
-cca_rulesetT3 :: RuleT (ArrowCCA a) (a (b,c) (b,c))
-cca_rulesetT3 [rule2| delay i |]                = into [|| loopD $$i swap ||]
+cca_rulesetT3 :: RuleE
+cca_rulesetT3 [rule| delay i |]                = into [| loopD $i swap |]
 cca_rulesetT3 a = return Nothing
 
 juggle :: ((t1, t), t2) -> ((t1, t2), t)

@@ -31,7 +31,7 @@ fixTuple es pat@(PApp a [rest]) (App (Con b) rest2) | toName a == toName b = fix
 fixTuple es PWildCard exp = [| ( $(foldl1 (&:&) es) ) >>> arr (\_ -> $(return $ toExp exp)) |]
 fixTuple es pat@(P a) (EP b rest) = [| $(fixTuple es pat b) &&& $(fixTuple es pat rest) |]  -- diag
 fixTuple es (P a) (E b) | toName a == toName b                 = [| ($(foldl1 (&:&) $ fmap TH.ParensE <$> es)) >>> id|]                                                                  -- id
-                        | otherwise                            = [| ($(foldl1 (&:&) $ fmap TH.ParensE <$> es)) >>> arr (\ $(return $ toPat $ P a) -> $(return $ toExp $ E b)) |]  -- arr
+                        | otherwise                            = [| ($(foldl1 (&:&) $ fmap TH.ParensE <$> es)) >>> $(buildArr (P a) (E b)) |]  -- arr
 fixTuple [e1,e2] pat@(TP a rest@(fmap toName . freeVars -> restFree)) (EP b rest2@(fmap toName . freeVars -> rest2Free))        -- ***
                   |  all (flip elem (toName <$> freeVars a)) (toName <$> freeVars b)
                       && (all (flip elem restFree) rest2Free)       = do

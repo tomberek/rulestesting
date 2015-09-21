@@ -1,3 +1,4 @@
+{-# LANGUAGE ImpredicativeTypes #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
@@ -20,8 +21,8 @@ module Language.Haskell.TH.Utilities(
     tuple, tupleP, tuplizer,
     times,
     hsQuote, hsSplice, quoteArr, quoteInit,     -- for CCA
-    rule,rule2,promote,promote',ifM,areExpAEq,expEqual,
-    unTypeRule,into,RuleT,RuleE,
+    rule,promote,promote',ifM,areExpAEq,expEqual,
+    into,RuleE
 ) where
 
 import           Data.Generics
@@ -45,61 +46,12 @@ import Control.Monad
 import Unsafe.Coerce
 import Control.Category
 import Prelude hiding (id,(.))
-import Control.Arrow(Arrow(arr))
+import Control.Arrow(Arrow(arr),(&&&))
 import GHC.Prim (Any)
 import Data.Coerce
 
 into :: Functor f => f a -> f (Maybe a)
 into = fmap Just
--- | Needs a free proxy to untyp TExp
--- Usage: (d3 (Id :: ASyn m a b) cca_rule1) :: Exp -> Q Exp
-unTypeRule :: C.Dict (ctx a) -> (ctx a => TH.TExp (a b c) -> Q (Maybe (TH.TExp (a b c)))) -> (TH.Exp -> Q (Maybe TH.Exp))
-unTypeRule C.Dict rule texp = fmap TH.unType <$> rule (TH.TExp texp)
-  where
-    validDict :: C.Dict (Eq ())
-    validDict = C.Dict
-    coercedDict :: C.Dict (ctx a)
-    coercedDict = unsafeCoerce validDict
-
-removeConstraint :: forall c a. Proxy c -> (c => a) -> a
-removeConstraint Proxy x = case coercedDict of
-    C.Dict -> x
-  where
-    validDict :: C.Dict (Eq ())
-    validDict = C.Dict
-    coercedDict :: C.Dict c
-    coercedDict = unsafeCoerce validDict
-
-unTypeR :: Proxy ctx -> (ctx a=> Q (TH.TExp (a b c)) -> Q (TH.TExp (a b c))) -> Q TH.Exp -> Q TH.Exp
-unTypeR i= case (proxy) of
-    (Proxy) -> toUntypedTransform . removeConstraint proxy
-    where proxy :: Proxy (ctx (a :: * -> * -> *):: C.Constraint)
-          proxy = unsafeCoerce Proxy
-
-typedTransform ::  Category a => TH.TExp (a b b) -> Q (Maybe (TH.TExp (a b b)))
-typedTransform _ = Just <$> [|| id ||]
-typedTransform2 ::  forall a b c. Arrow a => TH.TExp (a (b,c) b) -> Q (TH.TExp (a (b,c) b))
-typedTransform2 _ = [|| arr fst ||]
-
-l :: forall a b c ctx. ((ctx a) => TH.TExp (a b c) -> Q (TH.TExp (a b c))) -> TH.Exp -> ( Q (TH.TExp (a b c)),Q (TH.Exp))
-l f g = case coercedDict of
-    C.Dict -> (f $ TH.TExp g,coerce <$> removeConstraint (Proxy :: Proxy (ctx a)) (removeConstraint (Proxy :: Proxy (ctx a)) f $ TH.TExp g))
-  where
-    validDict :: C.Dict (Eq ())
-    validDict = C.Dict
-    coercedDict :: C.Dict (ctx a)
-    coercedDict = unsafeCoerce validDict
-    proxy :: Proxy (ctx (a :: * -> * -> *):: C.Constraint)
-    proxy = unsafeCoerce Proxy
-
-p = unTypeRule (C.Dict :: C.Dict (Category (->))) typedTransform
-
-type family Mult a :: C.Constraint where
-    Mult a = (Category a, Arrow a)
-
-toUntypedTransform :: (Q (TH.TExp a) -> Q (TH.TExp a)) -> Q TH.Exp -> Q TH.Exp
-toUntypedTransform f = TH.unTypeQ . f . TH.unsafeTExpCoerce
-
 
 tuplizer :: a -> ([a]->a) -> [a] -> a
 tuplizer u _ [] = u
@@ -161,39 +113,32 @@ rule = TH.QuasiQuoter {
 rule :: TH.QuasiQuoter
 rule = TH.QuasiQuoter{
       TH.quoteExp = \input -> case parseExp input of
-          Right b -> TH.dataToExpQ (const Nothing `extQ` updateNameTE) b
+          Right b -> TH.dataToExpQ (const Nothing `extQ` updateNameE) b
           Left c -> error $ "Exp: cannot parse rule pattern: " ++ c ++ " " ++ input
       , TH.quotePat = \input -> case parseExp input of
-          Right b -> TH.dataToPatQ (const Nothing `extQ` updateNameP `extQ` updatePat) b
+          Right (L.rewrite updateParens -> b) -> TH.dataToPatQ (const Nothing `extQ` updateNameP `extQ` updatePat) b
           Left c -> error $ "cannot parse rule pattern: " ++ c ++ " " ++ input
       , TH.quoteDec = error "cannot be declarations."
       , TH.quoteType = error "cannot be types."
                   }
-deriving instance Typeable TH.TExp
-deriving instance (Data a) => Data (TH.TExp a)
+type RuleE = TH.Exp -> Q (Maybe TH.Exp)
+
 updateNameP (TH.VarE n@(TH.Name (TH.OccName [s]) TH.NameS))
     | isLower s = Just $ [p| (TH.returnQ -> $(TH.varP n)) |] >>= return . TH.AsP (Name [s,'_'])
     | otherwise = Nothing
 updateNameP n = Nothing
-updateNameTP (TH.VarE n@(TH.Name (TH.OccName [s]) TH.NameS))
-    | isLower s = Just $ [p| (TH.returnQ . TH.TExp -> $(TH.varP n)) |] >>= return . TH.AsP (Name [s,'_'])
-    | otherwise = Nothing
-updateNameTP n = Nothing
 
 updateNameE (TH.VarE n@(TH.Name (TH.OccName [s]) TH.NameS))
     | isLower s = Just $ TH.varE n
     | otherwise = Nothing
 updateNameE n = Nothing
-updateNameTE (TH.VarE n@(TH.Name (TH.OccName [s]) TH.NameS))
-    | isLower s = Just $ [| TH.TExp $(TH.varE n) |]
-    | otherwise = Nothing
-updateNameTE n = Nothing
 
 updatePat :: TH.Pat -> Maybe (TH.Q (TH.Pat))
 updatePat (TH.VarP (Name s@[t])) = Just $
-    [p| (promote -> $( [p| (TH.returnQ -> $(TH.varP $ Name s)) |]
-        >>= return . TH.AsP (Name $ s ++ "_"))) |]
-        >>= return. TH.AsP (Name $ [t] ++ "'_")
+    [p| (promote &&& TH.returnQ -> ( $( [p| (TH.returnQ -> $(TH.varP $ Name $ s ++ "__")) |]
+        >>= return . TH.AsP (Name $ s ++ "_")), $(TH.varP $ Name s)
+                                      )) |]
+        >>= return. TH.AsP (Name $ s ++ "___" )
 updatePat _ = Nothing
 
 -- | Cannot cope with un-handled fixities, ensure all rules have clearly resolved fixity
@@ -206,33 +151,10 @@ updateFixity' :: TH.Exp -> Maybe TH.Exp
 updateFixity' (TH.InfixE (Just l) o (Just r)) = Just $ TH.UInfixE l o r
 updateFixity' n = Nothing
 
--- | Remove parens, how does this play with fixities and operators? Superfluous?
+-- | Remove all parens, how does this play with fixities and operators? Superfluous?
 updateParens :: TH.Exp -> Maybe TH.Exp
-updateParens (TH.ParensE e) = Just e
+updateParens (TH.ParensE e@(TH.LamE _ _)) = Just e
 updateParens n = Nothing
---updatePat n = error $ show n
---updatePat _ = Nothing
-rule2 :: TH.QuasiQuoter
-rule2 = rule{
-         TH.quoteExp = \input -> case parseExp input of
-             Right b -> [| TH.TExp $(TH.dataToExpQ (const Nothing `extQ` updateNameTE) b) |]
-             Left c -> error $ "Exp: cannot parse rule pattern: " ++ c ++ " " ++ input
-         , TH.quotePat = \input -> case parseExp input of
-             Right b -> do
-                 let b' = L.rewrite (orElse <$> updateFixity' <*> updateParens) b
-                 out <- [p| TH.TExp $(TH.dataToPatQ (const Nothing `extQ` updateNameTP `extQ` updatePat) b') |]
-                 --TH.reportWarning $ show out
-                 return out
-             Left c -> error $ "cannot parse rule pattern: " ++ c ++ " " ++ input
-         , TH.quoteDec = error "cannot be declarations."
-         , TH.quoteType = error "cannot be types."
-                 }
-
-
-type RuleE = TH.Exp -> Q (Maybe TH.Exp)
-type RuleT ctx a = ctx => TH.TExp a -> Q (Maybe (TH.TExp a))
-
-
 
 -- The set of free variables in some construct.
 class FreeVars a where

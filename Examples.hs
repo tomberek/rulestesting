@@ -11,6 +11,7 @@
 {-# LANGUAGE TypeFamilies    #-}
 {-# LANGUAGE LambdaCase    #-}
 {-# LANGUAGE AllowAmbiguousTypes    #-}
+{-# LANGUAGE Arrows    #-}
 module Examples where
 import           Control.Arrow.CCA.NoQ
 import           Control.Arrow.TH
@@ -25,19 +26,14 @@ import Control.Category.Associative
 import Control.Category.Structural
 import Control.Category.Monoidal
 import Control.Category.Cartesian
-import Control.Categorical.Bifunctor.Rules
+import Control.Categorical.Bifunctor
 import Language.Haskell.TH.Utilities
 import Language.Haskell.TH.Syntax
 import Language.Haskell.TH.Quote
 import Language.Haskell.TH.Lib
 import Language.Haskell.Meta.Parse
-import Data.Generics
 import Control.Applicative
 import Control.Arrow.CCA.Rules
-import qualified Language.Haskell.Exts as E
-import Language.Haskell.Meta.Utils
-import qualified Control.Lens as L
-import Control.Category.Rules
 {-
 line1 :: (Arrow a,Category a,ArrowCCA a) => a b b
 line1 = [arrow| proc g -> do

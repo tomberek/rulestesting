@@ -106,15 +106,11 @@ category rules = QuasiQuoter {
   quoteExp = \input -> case E.parseExpWithMode parseMode input of
       E.ParseOk result -> do
           res <- buildA result
-          --res2 <- L.rewriteM (reifyAlpha' ruleSet) res
-          --reportWarning $ show res
-          --let [a,b] = unTypeRule s <$> rules
-          --let ruleTs :: Data a => a -> Q a
-           --     ruleTs = return `extM` a `extM` b
           let
-              r exp = (runMaybeT . msum $ ( MaybeT . fmap cleanNames . flip ($) exp) <$> rules)
+              rules' exp = (runMaybeT . msum $ ( MaybeT . fmap cleanNames . flip ($) exp) <$> rules)
               res2 = transform fixity' $ cleanNames res
-          res3 <- rewriteM r res2
+          res3 <- rewriteM rules' res2
+          reportWarning $ show res3
           return res3 >>= arrFixer
       E.ParseFailed l err -> error $ "arrow QuasiQuoter: " ++ show l ++ " " ++ show err
   , quotePat = error "cannot be patterns."
@@ -142,7 +138,6 @@ arrFixer = rewriteM arg
             fmap Just [| terminate' ($(lift e)) $(returnQ e) |]
         arg _ = return Nothing
 
-
 buildA :: E.Exp -> ExpQ
 buildA (E.Proc _ pat exp) = buildB pat exp
 buildA exp = return $ toExp exp
@@ -166,10 +161,6 @@ buildB a b = error $ "Not supported: " ++ show (a,b)
 
 buildC :: [E.Stmt] -> [(E.Pat,ExpQ)] -> [(E.Pat,ExpQ)]
 buildC [] exps = exps
-{-
-buildC [stmt] [(pat,exp)] = [(pat',[| ( $exp ) >>> ( $exp' ) |])]
-    where (pat',exp') = buildD pat stmt
--}
 buildC stmts exps = if null newExps then exps else buildC rest (newExps ++ exps)
     where (goals,rest) = Data.List.partition (all (flip elem $ freeVars $ fst <$> exps) . freeVars) stmts
           sources :: [(E.Stmt,[(E.Pat,ExpQ)])] -- statements that can be built with their dependencies
@@ -190,22 +181,6 @@ buildD' stmt s = (origp,[| $fixedTuple  >>> $(returnQ $ toExp arrow) |])
           (arrow,exp,origp) = case stmt of
                                (E.Qualifier (E.LeftArrApp arrows f)) -> (arrows,f,E.PWildCard)
                                (E.Generator _ p (E.LeftArrApp arrows f)) -> (arrows,f,p)
---buildD' stmt s = (out,[| $(foldl1 (&:&) (snd <$> s)) >>> $out2 |]) -- NOTE: Assumes &&& is available, fix with weakening laws?
---      where (out,out2) = buildD (tuplizer E.PWildCard (E.PTuple E.Boxed) $ fst <$> s) stmt
-
-{-
-buildD :: E.Pat -> E.Stmt -> (E.Pat,ExpQ)
-buildD p (E.Qualifier      (E.LeftArrApp (return . toExp -> a) e )) = (E.PWildCard,[| ( $(buildArrow p e) ) >>>  ($a )|])
-buildD p (E.Generator _ p3 (E.LeftArrApp (return . toExp -> a) e )) = (p3,         [| ( $(buildArrow p e) ) >>> ($a )|])
-
--}
-
-                                    {-
-process ps (E.Proc _ b c) = Debug.Trace.trace (show b) $ process (ProcN 0 b (E.List []) [|Q.id|] : ps) c
-process ps (E.Do statements) = (buildGr allNodes , fromAscList $ zip (view i <$> allNodes) allNodes)
-    makeNodes ind (E.Generator _ p (E.LeftArrApp (returnQ . toExp -> e1) e2)) = (ind+1,StmtN ind p e2 e1)
-    makeNodes ind (E.Qualifier (E.LeftArrApp (returnQ . toExp -> e1) e2)) = (ind+1,CmdN ind E.PWildCard e2 e1)
-        ---}
 
 -- Internal Representation
 -- =======================

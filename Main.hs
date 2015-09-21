@@ -30,6 +30,7 @@ import Language.Haskell.TH.Utilities
 import Language.Haskell.TH.Syntax
 import Control.Category
 import Control.Categorical.Bifunctor.Rules
+import Control.Categorical.Bifunctor
 import Control.Applicative
 import qualified Language.Haskell.Exts as E
 import Data.Data
@@ -39,22 +40,35 @@ import Control.Arrow(arr)
 import Data.Generics
 import Control.Arrow.CCA.NoQ
 import Control.Arrow.CCA.Rules
-import Control.Category.Structural (Contract,(&&&),fst,snd)
+import Control.Category.Structural (Contract,(&&&),fst,snd,Weaken)
+import Control.Arrow
+import Control.Category.Free
+import Control.Category.Rules
+import Data.Maybe
 deriving instance Show NameFlavour
 deriving instance Show NameSpace
-p :: Contract p a => a (p b c) (p b c)
+p :: (Arrow a,ArrowCCA a,Contract (,) a,Weaken (,) a) => a (b,c) (b,c)
 p = [catCCA|
     proc (n,m) -> do
         id -< (n,m)
     |]
 
+m :: FreeCategory (ASyn m) a a
+m = s >>> s >>> id >>> id
+s = FreeCategoryBaseOp (AExp Control.Arrow.CCA.Free.Swap)
+undo :: Category cat => FreeCategory cat a b -> cat a b
+undo (FreeCategoryBaseOp c) = c
+undo (CategoryOp Control.Category.Free.Id) = id
+undo (CategoryOp ((undo -> a) Control.Category.Free.:>>> (undo -> b))) = a >>> b
 main :: IO ()
 main = do
     --print $ [| fst >>> arr id >>> arr (+1) |] >>= L.rewriteM reifyLaws
     --print $ [| id >>> id |] >>= L.rewriteM reifyLaws
     --print $ [| first id >>> id >>> id |] >>= L.rewriteM reifyLaws
     printCCA p
-    printCCA line4
+    printCCA $ undo m
+    printCCA $ undo $ rewrite (removeId) m
+    --printCCA line4
     {-
     printCCA line1
     printCCA line2

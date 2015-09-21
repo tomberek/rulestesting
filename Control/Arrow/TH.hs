@@ -178,10 +178,6 @@ buildB a b = error $ "Not supported: " ++ show (a,b)
 
 buildC :: [E.Stmt] -> [(E.Pat,ExpQ)] -> [(E.Pat,ExpQ)]
 buildC [] exps = exps
-{-
-buildC [stmt] [(pat,exp)] = [(pat',[| ( $exp ) >>> ( $exp' ) |])]
-    where (pat',exp') = buildD pat stmt
--}
 buildC stmts exps = if null goals then error "cannot make progress" else buildC rest (newExps ++ exps)
     where (goals,rest) = Data.List.partition (all (flip elem $ freeVars $ fst <$> exps) . freeVars) stmts
           sources :: [(E.Stmt,[(E.Pat,ExpQ)])] -- statements that can be built with their dependencies
