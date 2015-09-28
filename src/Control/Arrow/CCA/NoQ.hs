@@ -38,6 +38,7 @@ import qualified Control.Category.Structural (Weaken(..))
 -- `first f >>> second g == second g >>> first f`
 -- `init i *** init j == init (i,j)`
 instance ArrowCCA (->) where
+    delay = error "undefined delay for -> "
 class (ArrowLoop a,Weaken (,) a) => ArrowCCA a where
     {-# NOINLINE arr' #-}
     arr' :: Exp -> (b->c) -> a b c

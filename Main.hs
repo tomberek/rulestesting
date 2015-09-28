@@ -42,6 +42,7 @@ import Control.Arrow.CCA.NoQ
 import Control.Arrow.CCA.Rules
 import Control.Category.Structural (Contract,(&&&),fst,snd,Weaken)
 import Control.Arrow
+import Control.Monad
 import Control.Category.Free
 import Control.Category.Rules
 import Data.Maybe
@@ -54,20 +55,27 @@ p = [catCCA|
     |]
 
 m :: FreeCategory (ASyn m) a a
-m = s >>> s >>> id >>> id
+m = id >>> s >>> id >>> id >>> s >>> s >>> id >>> id >>> id >>> id >>> id >>> s >>> id
 s = FreeCategoryBaseOp (AExp Control.Arrow.CCA.Free.Swap)
+
+
 undo :: Category cat => FreeCategory cat a b -> cat a b
 undo (FreeCategoryBaseOp c) = c
 undo (CategoryOp Control.Category.Free.Id) = id
 undo (CategoryOp ((undo -> a) Control.Category.Free.:>>> (undo -> b))) = a >>> b
+
 main :: IO ()
 main = do
     --print $ [| fst >>> arr id >>> arr (+1) |] >>= L.rewriteM reifyLaws
     --print $ [| id >>> id |] >>= L.rewriteM reifyLaws
     --print $ [| first id >>> id >>> id |] >>= L.rewriteM reifyLaws
-    printCCA p
+    --printCCA p
     printCCA $ undo m
-    printCCA $ undo $ rewrite (removeId) m
+    printCCA $ undo $ removeAllIds m
+    --printCCA $ undo $ removeId m
+    --printCCA $ undo $ fromJust $ removeId m
+    --printCCA $ undo $ fromJust $ bottomupM removeId m
+    --printCCA $ undo $ fromJust $ bottomupM removeId id
     --printCCA line4
     {-
     printCCA line1

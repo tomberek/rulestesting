@@ -1,11 +1,19 @@
+{-# LANGUAGE ImpredicativeTypes #-}
+{-# LANGUAGE LiberalTypeSynonyms #-}
+{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE LambdaCase #-}
 module Control.Category.Rules where
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax
@@ -17,49 +25,47 @@ import Control.Category.Structural
 import Control.Category
 import Prelude hiding (id,(.),fst,snd)
 import qualified Data.Constraint as C
+import Control.Applicative
 --import Control.Arrow.TH (ASyn)
-import Data.Data
+
 import Debug.Trace
 import Control.Arrow.CCA.NoQ
 import Control.Category.Free
---import Control.Arrow.CCA.Free
 import Control.Applicative
 import Control.Monad.Identity
+import Data.Maybe
+import Data.Monoid
+import Data.Coerce
+import Control.Lens.Plated
+import Control.Lens.Type
+import Control.Lens.Setter
+import Data.Compos
+import Data.Generics.Multiplate
+
 category_ruleset :: [Exp -> Q (Maybe Exp)]
 category_ruleset = [] --category_id,category_id_comp,category_leftAssoc]
 
-instance Compos (FreeCategory) where
-    compos f t = case t of
-        CategoryOp Id -> pure id
-        CategoryOp (a :>>> b) -> CategoryOp <$> (pure (:>>>) <*> f a <*> f b)
-        _ -> pure t
+removeAllIds :: FreeCategory cat a b -> FreeCategory cat a b
+removeAllIds = traverseFor catplate (evalFamily removeId)
 
-rewrite :: Compos t => (forall (t :: (* -> * -> *) -> * -> * -> *) cat a b. t cat a b -> Maybe ( (t cat a b))) ->
-           t cat a b -> t cat a b
-rewrite f = composOp g
-    where
-        g :: forall (t :: (* -> * -> *) -> * -> * -> *) a b. (forall (cat :: * -> * -> *). Compos t => t cat a b -> t cat a b)
-        g x = maybe x (rewrite f) (f x)
+removeId :: CatPlate Maybe
+removeId = CatPlate{catplate = \case
+    (a :>>>> Idd) -> pure a
+    (Idd :>>>> a) -> pure a
+    _ -> empty
+    }
+data CatPlate f = CatPlate {catplate ::forall cat a b. FreeCategory cat a b -> f (FreeCategory cat a b)}
+instance Multiplate CatPlate where
+    multiplate plate = CatPlate (buildCat plate)
+    mkPlate build = CatPlate (build catplate)
 
-removeId :: FreeCategory cat a b -> Maybe (FreeCategory cat a b)
-removeId t = case t of
-    CategoryOp (CategoryOp Id :>>> b) -> Just b
-    CategoryOp (b :>>> CategoryOp Id) -> Just b
-    CategoryOp Id -> Nothing
-    FreeCategoryBaseOp _ -> Nothing
-    _ -> composM removeId t
+buildCat :: Applicative f => CatPlate f -> FreeCategory cat a b -> f (FreeCategory cat a b)
+buildCat _ Idd = pure Idd
+buildCat plate (a :>>>> b) = (:>>>>) <$> catplate plate a <*> catplate plate b
+buildCat _ x@(FreeCategoryBaseOp _) = pure x
 
-class Compos t where
-    compos :: Applicative f => (forall (cat :: * -> * -> *) a b. t cat a b -> f (t cat a b)) ->
-        t cat a b -> f (t cat a b)
-composOp :: Compos t => (forall cat a b. t cat a b -> t cat a b) -> t cat a b -> t cat a b
-composOp f = runIdentity . compos (Identity . f)
-composM :: (Compos t,Monad m) => (forall (cat :: * -> * -> *)  a b. t cat a b -> m (t cat a b)) ->
-        t cat a b -> m (t cat a b)
-composM f = unwrapMonad . compos (WrapMonad . f)
-composAlt :: (Compos t,Alternative m,Monad m) => (forall (cat :: * -> * -> *)  a b. t cat a b -> m (t cat a b)) ->
-          t cat a b -> m (t cat a b)
-composAlt f = unwrapMonad . composM (WrapMonad . f)
+pattern a :>>>> b = CategoryOp (a :>>> b)
+pattern Idd = CategoryOp Id
 
 --{-# RULES "arr id" forall n (m :: a->a). arr' n m = trace "fired arr id" id #-}
 {-# RULES "arr id" forall n (m ::forall a b. (a,b)->(a,b)). arr' n m = trace "fired arr id" id #-}

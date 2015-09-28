@@ -14,6 +14,8 @@ extra-packages: ! 'Hackage: th-alpha 0.2.0.2
 
   Git: https://github.com/gelisam/category-syntax 3074f23f8597569fad4b1c4480b8a5efd6d098b2
 
+  Hackage: multiplate 0.0.3
+
 '
 ghc-args:
 - -fdefer-type-errors

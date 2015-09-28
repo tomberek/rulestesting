@@ -110,7 +110,7 @@ category rules = QuasiQuoter {
               rules' exp = (runMaybeT . msum $ ( MaybeT . fmap cleanNames . flip ($) exp) <$> rules)
               res2 = transform fixity' $ cleanNames res
           res3 <- rewriteM rules' res2
-          reportWarning $ show res3
+          --reportWarning $ show res3
           return res3 >>= arrFixer
       E.ParseFailed l err -> error $ "arrow QuasiQuoter: " ++ show l ++ " " ++ show err
   , quotePat = error "cannot be patterns."
@@ -148,7 +148,7 @@ pattern R r <- (return -> r)
 
 buildB :: E.Pat -> E.Exp -> ExpQ
 buildB pat (E.Do exps) = do
-    reportWarning "un-split proc pattern"
+    --reportWarning "un-split proc pattern"
     snd $ head final
     where rest = buildC (init exps) [(pat,[|id|])]
           final = buildC [last exps] rest
