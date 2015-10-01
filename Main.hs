@@ -41,18 +41,20 @@ import Data.Generics
 import Control.Arrow.CCA.NoQ
 import Control.Arrow.CCA.Rules
 import Control.Category.Structural (Contract,(&&&),fst,snd,Weaken)
-import Control.Arrow
+import Control.Arrow hiding (second)
 import Control.Monad
 import Control.Category.Free
 import Control.Category.Rules
 import Data.Maybe
 deriving instance Show NameFlavour
 deriving instance Show NameSpace
+{-
 p :: (Arrow a,ArrowCCA a,Contract (,) a,Weaken (,) a) => a (b,c) (b,c)
 p = [catCCA|
     proc (n,m) -> do
         id -< (n,m)
     |]
+-}
 
 m :: FreeCategory (ASyn m) a a
 m = id >>> s >>> id >>> id >>> s >>> s >>> id >>> id >>> id >>> id >>> id >>> s >>> id
@@ -70,13 +72,12 @@ main = do
     --print $ [| id >>> id |] >>= L.rewriteM reifyLaws
     --print $ [| first id >>> id >>> id |] >>= L.rewriteM reifyLaws
     --printCCA p
-    printCCA $ undo m
-    printCCA $ undo $ removeAllIds m
     --printCCA $ undo $ removeId m
     --printCCA $ undo $ fromJust $ removeId m
     --printCCA $ undo $ fromJust $ bottomupM removeId m
     --printCCA $ undo $ fromJust $ bottomupM removeId id
-    --printCCA line4
+    printCCA line4
+    printCCA line5
     {-
     printCCA line1
     printCCA line2

@@ -112,8 +112,9 @@ category rules = QuasiQuoter {
           --let ruleTs :: Data a => a -> Q a
            --     ruleTs = return `extM` a `extM` b
           let
-              r exp = (runMaybeT . msum $ ( MaybeT . fmap cleanNames . flip ($) exp) <$> rules)
-              res2 = transform fixity' $ cleanNames res
+              r exp = (runMaybeT . msum $ ( MaybeT . fmap cleanNames . (fmap.fmap) (transform fixity) . flip ($) exp) <$> rules)
+              res2 = transform fixity $ cleanNames res
+          reportWarning $ "built" ++ show res2
           res3 <- rewriteM r res2
           return res3 >>= arrFixer'
       E.ParseFailed l err -> error $ "arrow QuasiQuoter: " ++ show l ++ " " ++ show err
@@ -173,8 +174,8 @@ buildB :: E.Pat -> E.Exp -> ExpQ
 buildB pat (E.Do exps) = snd $ head final
     where rest = buildC (init exps) [(pat,[|id|])]
           final = buildC [last exps] rest
-buildB p (E.LeftArrApp (return . toExp -> arrow) e) | otherwise = [| $(buildArrow p e) >>> $arrow |]
-buildB a b = error $ "Not supported: " ++ show (a,b)
+buildB p (E.LeftArrApp (return . toExp -> arrow) e) = [| $(buildArrow p e) >>> $arrow |]
+buildB a b = error $ "Not supported B: " ++ show (a,b)
 
 buildC :: [E.Stmt] -> [(E.Pat,ExpQ)] -> [(E.Pat,ExpQ)]
 buildC [] exps = exps

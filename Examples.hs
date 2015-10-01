@@ -36,34 +36,34 @@ import Control.Applicative
 import Control.Arrow.CCA.Rules
 {-
 line1 :: (Arrow a,Category a,ArrowCCA a) => a b b
-line1 = [arrow| proc g -> do
+line1 = [catCCA| proc g -> do
             id -< g|]
 
 line2 :: (HasTerminal a,Category a) => a Int ()
-line2 = [arrow| proc g -> id -< () |]
+line2 = [catCCA| proc g -> id -< () |]
 
 line3 :: (Weaken (,) a,Category a,ArrowCCA a) => a (Int,Int) Int
-line3 = [arrow| proc (x,y) -> do
+line3 = [catCCA| proc (x,y) -> do
             id -< x |]
+
 ---}
-line4 :: (Weaken (,) a,Contract (,) a,Category a,ArrowCCA a) => a (Int,Int) Int
+line4 :: (Weaken (,) a,Contract (,) a,Category a,ArrowCCA a,Symmetric (,) a) => a (Int,Int) Int
 line4 = [catCCA| proc (x,y) -> do
              z <- arr (*2) -< x+1
              id -< (z+y)
              |]
 
-{-
 line5 :: ArrowCCA a => a (Maybe c) c
-line5 = [arrow| proc (Just a) -> id -< a |]
+line5 = [catCCA| proc (Just a) -> id -< a |]
+
 {-
-line5 :: (Weaken (,) a,Category a) => a (Int,Int) Int
-line5 = [arrow| proc (x,y) -> do
+line6 :: (Category a) => a (Int,Int) (Int,Int)
+line6 = [catCCA| proc (x,y) -> do
             z <- id -< x
             id -< (z,y)
             |]
 ---}
 
-{-
 processURL :: String -> IO String
 processURL a = do
     getCurrentTime >>= print
@@ -72,16 +72,17 @@ processURL a = do
     getResponseBody response
 
 getURLSum :: (M a ~ IO,ArrowCCA a) => a String Int
-getURLSum = [arrow| (arrM processURL) >>> (arr length) |]
+getURLSum = [catCCA| (arrM processURL) >>> (arr length) |]
 
-line2 :: (M a ~ IO, ArrowCCA a,Weaken (,) a,Symmetric (,) a,Contract (,) a) => a (String,String) Int
-line2 = [arrow|
+line7 :: (M a ~ IO, ArrowCCA a,Weaken (,) a,Symmetric (,) a,Contract (,) a) => a (String,String) Int
+line7 = [catCCA|
     proc (x,y) -> do
         a <- getURLSum -< y
         b <- getURLSum -< x
         returnA -< a+b
     |]
-    {-
+---}
+        {-
     (e,f) <- cap ()
     (g,h) <- over (c,e)
     (i,j) <- over (f,d)
@@ -98,23 +99,22 @@ line2 = [arrow|
     () <- cup (w,x)
     -}
 
-line3a :: (HasTerminal () a, Symmetric (,) a,HasIdentity () (,) a,Weaken (,) a,Contract (,) a,ArrowCCA a) => a (b,c) (c,())
-line3a = [arrow|
+line8 :: (HasTerminal a, Symmetric (,) a) => a (b,c) (c,())
+line8 = [catCCA|
     proc (a,b) -> do
-        f <- terminate -< a
+        f <- terminate () -< a
         g <- id -< b
         id -< (g,f)
         |]
-{-
-line3a :: (HasTerminal () a,Symmetric (,) a,HasIdentity () (,) a,Weaken (,) a,ArrowCCA a) => a (c,b) ((),())
-line3a = [arrow|
+line9 :: (HasTerminal a,Symmetric (,) a,HasIdentity () (,) a,Weaken (,) a,ArrowCCA a) => a (c,b) ((),())
+line9 = [catCCA|
     proc (a,b) -> do
         (c,d) <- swap -< (a,b)
-        (e,f) <- terminate *** terminate -< ((),())
+        (e,f) <- terminate () *** terminate () -< ((),())
         (g,h) <- swap -< (c,e)
         (i,j) <- swap -< (f,d)
-        (m,n) <- terminate *** terminate -< ((),())
-        (k,l) <- terminate *** terminate -< ((),())
+        (m,n) <- terminate () *** terminate () -< ((),())
+        (k,l) <- terminate () *** terminate () -< ((),())
         (q,r) <- swap -< (h,k)
         (s,y) <- swap -< (l,i)
         (o,p) <- swap -< (n,g)

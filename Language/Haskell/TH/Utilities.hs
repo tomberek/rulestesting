@@ -22,7 +22,7 @@ module Language.Haskell.TH.Utilities(
     times,
     hsQuote, hsSplice, quoteArr, quoteInit,     -- for CCA
     rule,promote,promote',ifM,areExpAEq,expEqual,
-    into,RuleE
+    into,RuleE,nothing
 ) where
 
 import           Data.Generics
@@ -52,6 +52,10 @@ import Data.Coerce
 
 into :: Functor f => f a -> f (Maybe a)
 into = fmap Just
+
+nothing :: Monad m => m (Maybe a)
+nothing = return Nothing
+
 
 tuplizer :: a -> ([a]->a) -> [a] -> a
 tuplizer u _ [] = u
@@ -116,7 +120,7 @@ rule = TH.QuasiQuoter{
           Right b -> TH.dataToExpQ (const Nothing `extQ` updateNameE) b
           Left c -> error $ "Exp: cannot parse rule pattern: " ++ c ++ " " ++ input
       , TH.quotePat = \input -> case parseExp input of
-          Right (L.rewrite updateParens -> b) -> TH.dataToPatQ (const Nothing `extQ` updateNameP `extQ` updatePat) b
+          Right (L.rewrite updateFixity . L.rewrite updateParens -> b) -> TH.dataToPatQ (const Nothing `extQ` updateNameP `extQ` updatePat) b
           Left c -> error $ "cannot parse rule pattern: " ++ c ++ " " ++ input
       , TH.quoteDec = error "cannot be declarations."
       , TH.quoteType = error "cannot be types."
@@ -146,14 +150,11 @@ updateFixity :: TH.Exp -> Maybe TH.Exp
 updateFixity (TH.UInfixE l o r) = Just $ TH.InfixE (Just l) o (Just r)
 updateFixity n = Nothing
 
--- | Cannot cope with un-handled fixities, ensure all rules have clearly resolved fixity
-updateFixity' :: TH.Exp -> Maybe TH.Exp
-updateFixity' (TH.InfixE (Just l) o (Just r)) = Just $ TH.UInfixE l o r
-updateFixity' n = Nothing
-
 -- | Remove all parens, how does this play with fixities and operators? Superfluous?
 updateParens :: TH.Exp -> Maybe TH.Exp
 updateParens (TH.ParensE e@(TH.LamE _ _)) = Just e
+updateParens (TH.ParensE (TH.UInfixE a b c)) = Just $ TH.InfixE (Just a) b (Just c)
+updateParens (TH.ParensE (TH.AppE a b)) = Just $ TH.AppE a b
 updateParens n = Nothing
 
 -- The set of free variables in some construct.

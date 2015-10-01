@@ -107,10 +107,10 @@ category rules = QuasiQuoter {
       E.ParseOk result -> do
           res <- buildA result
           let
-              rules' exp = (runMaybeT . msum $ ( MaybeT . fmap cleanNames . flip ($) exp) <$> rules)
-              res2 = transform fixity' $ cleanNames res
-          res3 <- rewriteM rules' res2
-          --reportWarning $ show res3
+              rules' exp = (runMaybeT . msum $ ( MaybeT . fmap cleanNames . (fmap.fmap) (transform fixity) . flip ($) exp) <$> rules)
+              res2 = transform fixity $ cleanNames res
+          res3 <- rewriteM (rules' . transform fixity) res2
+          reportWarning $ pprint res3
           return res3 >>= arrFixer
       E.ParseFailed l err -> error $ "arrow QuasiQuoter: " ++ show l ++ " " ++ show err
   , quotePat = error "cannot be patterns."
@@ -152,11 +152,9 @@ buildB pat (E.Do exps) = do
     snd $ head final
     where rest = buildC (init exps) [(pat,[|id|])]
           final = buildC [last exps] rest
-          {-
-buildB p (E.LeftArrApp (return . toExp -> arrow) e)
-         -- | promote (toPat p) == (toExp e) = [| $arrow |] -- Id arrow law
-         | otherwise = [| ( $(buildArrow p e) )  >>> ( $arrow )|]
-          -}
+buildB pat s@(E.LeftArrApp _ _)
+           -- | promote (toPat p) == (toExp e) = [| $arrow |] -- Id arrow law
+           | otherwise = [| $(snd $ buildD' (E.Qualifier s) [(pat,[|id|])] )|]
 buildB a b = error $ "Not supported: " ++ show (a,b)
 
 buildC :: [E.Stmt] -> [(E.Pat,ExpQ)] -> [(E.Pat,ExpQ)]
@@ -236,6 +234,8 @@ areExpAEq' f g = do
 fixity :: Data a => a -> a
 fixity = G.everywhere (G.mkT expf)
     where expf (UInfixE l op r) = InfixE (Just l) op (Just r)
+          expf (InfixE (Just (ParensE l)) op (Just r)) = InfixE (Just l) op (Just r)
+          expf (InfixE (Just l) op (Just (ParensE r))) = InfixE (Just l) op (Just r)
           expf e = e
 fixity' :: Data a => a -> a
 fixity' = G.everywhere (G.mkT expf)
