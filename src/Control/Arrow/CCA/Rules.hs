@@ -9,7 +9,7 @@ import Language.Haskell.TH
 import Language.Haskell.TH.Syntax
 import Language.Haskell.TH.Utilities
 
-import Control.Arrow hiding (first,second,(***))
+import Control.Arrow hiding (first,second,(***),(&&&))
 import Control.Category.Associative
 import Control.Category.Structural
 import Control.Categorical.Bifunctor
@@ -25,7 +25,7 @@ import Control.Arrow.CCA.NoQ
 
 catCCA = category $ category_ruleset ++ bifunctor_ruleset ++ assoc_ruleset ++ struct_ruleset ++ cca_ruleset
 
-cca_ruleset = [cca_rulesetT,cca_rulesetT2,cca_rulesetT3]
+cca_ruleset = [cca_rulesetT,cca_rulesetT2,cca_rulesetT3,cca_rulesetTerm]
 cca_rulesetT :: RuleE
 cca_rulesetT [rule| arr f >>> arr g |] = into [|  arr ( $g . $f) |]
 cca_rulesetT [rule| arr f >>> loopD i g |]    = into [| loopD $i ( $g . ($f *** id) ) |]
@@ -46,7 +46,8 @@ cca_rulesetT3 a = nothing
 
 cca_rulesetTerm :: RuleE
 cca_rulesetTerm [rule| f >>> terminate g |] = into [| terminate $g |] -- unsound? removes effects?
-cca_rulesetTerm [rule|  >>> terminate g |] = into [| terminate $g |]
+cca_rulesetTerm [rule| f >>> (terminate h *** terminate g) |] = into [| terminate $h *** terminate $g |] -- unsound? removes effects?
+cca_rulesetTerm [rule| f >>> (terminate h &&& terminate g) |] = into [| terminate $h &&& terminate $g |] -- unsound? removes effects?
 cca_rulesetTerm _ = nothing
 
 juggle :: ((t1, t), t2) -> ((t1, t2), t)

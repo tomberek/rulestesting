@@ -13,7 +13,7 @@
 {-# LANGUAGE AllowAmbiguousTypes    #-}
 {-# LANGUAGE Arrows    #-}
 module Examples where
-import           Control.Arrow.CCA.NoQ
+import           Control.Arrow.CCA
 import           Control.Arrow.TH
 import           Control.Arrow hiding ((&&&),(***),first,second)
 import           Control.Concurrent          (threadDelay)
@@ -34,7 +34,6 @@ import Language.Haskell.TH.Lib
 import Language.Haskell.Meta.Parse
 import Control.Applicative
 import Control.Arrow.CCA.Rules
-{-
 line1 :: (Arrow a,Category a,ArrowCCA a) => a b b
 line1 = [catCCA| proc g -> do
             id -< g|]
@@ -44,7 +43,7 @@ line2 = [catCCA| proc g -> id -< () |]
 
 line3 :: (Weaken (,) a,Category a,ArrowCCA a) => a (Int,Int) Int
 line3 = [catCCA| proc (x,y) -> do
-            id -< x |]
+            line1 -< x |]
 
 ---}
 line4 :: (Weaken (,) a,Contract (,) a,Category a,ArrowCCA a,Symmetric (,) a) => a (Int,Int) Int
@@ -99,14 +98,15 @@ line7 = [catCCA|
     () <- cup (w,x)
     -}
 
-line8 :: (HasTerminal a, Symmetric (,) a) => a (b,c) (c,())
+line8 :: (HasTerminal a, Symmetric (,) a,Contract (,) a) => a (b,c) (c,())
 line8 = [catCCA|
     proc (a,b) -> do
         f <- terminate () -< a
         g <- id -< b
         id -< (g,f)
         |]
-line9 :: (HasTerminal a,Symmetric (,) a,HasIdentity () (,) a,Weaken (,) a,ArrowCCA a) => a (c,b) ((),())
+{-
+line9 :: (HasTerminal a,Symmetric (,) a,HasIdentity () (,) a,Weaken (,) a,ArrowCCA a,Contract (,) a) => a (c,b) ((),())
 line9 = [catCCA|
     proc (a,b) -> do
         (c,d) <- swap -< (a,b)
@@ -276,11 +276,11 @@ example1 = [arrow|
             e <- arr (+1) -< a + (1::Int)
         returnA -< a
     |]
+-}
 
 
-{-
 i :: ArrowCCA a => a Int Int
-i = [arrow|
+i = [catCCA|
     proc n -> do
         x <- arr id -< n
         y <- arr (+1) -< x

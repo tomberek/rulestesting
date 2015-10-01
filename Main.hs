@@ -38,10 +38,11 @@ import qualified Control.Lens as L
 import Data.Typeable
 import Control.Arrow(arr)
 import Data.Generics
-import Control.Arrow.CCA.NoQ
+import Control.Arrow.CCA
+import Control.Arrow.CCA.Free(norm)
 import Control.Arrow.CCA.Rules
 import Control.Category.Structural (Contract,(&&&),fst,snd,Weaken)
-import Control.Arrow hiding (second)
+import Control.Arrow hiding (second,(***),(&&&))
 import Control.Monad
 import Control.Category.Free
 import Control.Category.Rules
@@ -60,6 +61,10 @@ m :: FreeCategory (ASyn m) a a
 m = id >>> s >>> id >>> id >>> s >>> s >>> id >>> id >>> id >>> id >>> id >>> s >>> id
 s = FreeCategoryBaseOp (AExp Control.Arrow.CCA.Free.Swap)
 
+g :: ArrowCCA a => a (Int,Int) Int
+g = $(norm line4)
+
+h = $(norm line7)
 
 undo :: Category cat => FreeCategory cat a b -> cat a b
 undo (FreeCategoryBaseOp c) = c
@@ -77,7 +82,10 @@ main = do
     --printCCA $ undo $ fromJust $ bottomupM removeId m
     --printCCA $ undo $ fromJust $ bottomupM removeId id
     printCCA line4
-    printCCA line5
+    printCCA g
+    printCCA line7
+    printCCA h
+    printCCA $(norm line3)
     {-
     printCCA line1
     printCCA line2
