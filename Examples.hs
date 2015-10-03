@@ -63,6 +63,7 @@ line6 = [catCCA| proc (x,y) -> do
             |]
 ---}
 
+
 processURL :: String -> IO String
 processURL a = do
     getCurrentTime >>= print
@@ -98,15 +99,20 @@ line7 = [catCCA|
     () <- cup (w,x)
     -}
 
-line8 :: (HasTerminal a, Symmetric (,) a,Contract (,) a) => a (b,c) (c,())
+line8 :: (HasTerminal a, Symmetric (,) a,Contract (,) a,Weaken (,) a) => a (b,c) (c,())
 line8 = [catCCA|
     proc (a,b) -> do
         f <- terminate () -< a
         g <- id -< b
         id -< (g,f)
         |]
-{-
-line9 :: (HasTerminal a,Symmetric (,) a,HasIdentity () (,) a,Weaken (,) a,ArrowCCA a,Contract (,) a) => a (c,b) ((),())
+
+temp :: (Associative (,) a,Contract (,) a,Weaken (,) a) => a ((b,c),d) (c,d)
+temp = [catCCA|
+    proc n -> associate >>> snd -< n
+    |]
+
+line9 :: (Associative (,) a,HasTerminal a,Symmetric (,) a,HasIdentity () (,) a,Weaken (,) a,ArrowCCA a,Contract (,) a) => a (c,b) ((),())
 line9 = [catCCA|
     proc (a,b) -> do
         (c,d) <- swap -< (a,b)
@@ -255,29 +261,38 @@ example4b = [arrow|
         d <- arr (uncurry (+)) -< (n,n)
         arr (uncurry (-)) -< (n,d)
             |]
+
+
 example2 :: (Symmetric (,) a,Contract (,) a,ArrowCCA a) => a Int Int
-example2 = [arrow|
-    proc n -> do
-        b <-  arr (+1) -< n+2*3
-        e <-  arr (+2) -< n
-        c <-  arr (+3) -< b
-        d <-  arr (uncurry (+)) -< (c,e)
-        arr (uncurry (-)) -< (n,d)
+example2 = [catCCA|
+    proc x -> do
+            y <- f -< x+1
+            g -< 2*y
+            let z = x+y
+            t <- h -< x*z
+            returnA -< t+z
             |]
 ---}
+{-
+should be 
+arr (\ x -> (x+1, x)) >>>
+        first f >>>
+        arr (\ (y, x) -> (2*y, (x, y))) >>>
+        first g >>>
+        arr (\ (_, (x, y)) -> let z = x+y in (x*z, z)) >>>
+        first h >>>
+        arr (\ (t, z) -> t+z)
 ---}
-
-{- no implemented yet
-example1 :: ArrowInit a => a Int Int
-example1 = [arrow|
+{-
+example1 :: ArrowCCA a => a Int Int
+example1 = [catCCA|
     proc n -> do
         a  <- arr (\x -> x) -< (n::Int)
         rec
             e <- arr (+1) -< a + (1::Int)
-        returnA -< a
+            b <- init 0 -< e
+        returnA -< b
     |]
--}
-
 
 i :: ArrowCCA a => a Int Int
 i = [catCCA|

@@ -78,6 +78,7 @@ import Data.Typeable
 import Data.Data
 import qualified Data.Constraint as C
 import Control.Monad.Trans.Maybe
+import Control.Monad
 
 parseMode = E.defaultParseMode{E.extensions=[E.EnableExtension E.Arrows],E.fixities=Just (E.baseFixities)}
 
@@ -101,18 +102,22 @@ arrow2 = QuasiQuoter {
     }
     where parseMode = E.defaultParseMode{E.extensions=[E.EnableExtension E.Arrows],E.fixities=Just (E.baseFixities)}
 
+
+transformExp result rules = do
+    let
+        rules' exp = (runMaybeT . msum $ ( MaybeT . fmap cleanNames . flip ($) exp) <$> rules)
+        res2 = cleanNames result
+    rewriteM (rules' . transform fixity) res2
+
 --category :: C.Dict (con a) -> [(con a => TExp (a b c) -> (Q (TExp (a b c))))] -> QuasiQuoter
-category :: [Exp -> Q (Maybe Exp)] -> QuasiQuoter
+category :: [[Exp -> Q (Maybe Exp)]] -> QuasiQuoter
 category rules = QuasiQuoter {
   quoteExp = \input -> case E.parseExpWithMode parseMode input of
       E.ParseOk result -> do
           res <- buildA result
-          let
-              rules' exp = (runMaybeT . msum $ ( MaybeT . fmap cleanNames . (fmap.fmap) (transform fixity) . flip ($) exp) <$> rules)
-              res2 = transform fixity $ cleanNames res
-          res3 <- rewriteM (rules' . transform fixity) res2
-          reportWarning $ pprint res3
-          return res3 >>= arrFixer
+          res2 <- foldM transformExp res rules
+          reportWarning $ pprint res2
+          arrFixer res2
       E.ParseFailed l err -> error $ "arrow QuasiQuoter: " ++ show l ++ " " ++ show err
   , quotePat = error "cannot be patterns."
   , quoteDec = error "category: cannot by dec"
@@ -170,9 +175,7 @@ buildB pat (E.Do exps) = do
     snd $ head final
     where rest = buildC (init exps) [(pat,[|id|])]
           final = buildC [last exps] rest
-buildB pat s@(E.LeftArrApp _ _)
-           -- | promote (toPat p) == (toExp e) = [| $arrow |] -- Id arrow law
-           | otherwise = [| $(snd $ buildD' (E.Qualifier s) [(pat,[|id|])] )|]
+buildB pat s@(E.LeftArrApp _ _) = [| $(snd $ buildD' (E.Qualifier s) [(pat,[|id|])] )|]
 buildB a b = error $ "Not supported: " ++ show (a,b)
 
 buildC :: [E.Stmt] -> [(E.Pat,ExpQ)] -> [(E.Pat,ExpQ)]
@@ -191,14 +194,48 @@ expr1 *:* expr2 = infixE (Just expr1) (varE $ mkName "***") (Just expr2)
 expr1 &:& expr2 = infixE (Just expr1) (varE $ mkName "&&&") (Just expr2)
 
 buildD' :: E.Stmt -> [(E.Pat,ExpQ)] -> (E.Pat,ExpQ)
-buildD' stmt s = (origp,[| $fixedTuple  >>> $(returnQ $ toExp arrow) |])
+buildD' stmt@(E.RecStmt _) s = (origp,[| $fixedTuple >>> loop ($fixedSetup >>> $joinedArrows >>> $fixedTuple2) |])
+    where
+          fixedTuple = foldl1 (&:&) (snd <$> s)
+          fixedSetup = buildArr (tuplizer E.PWildCard (E.PTuple E.Boxed) $ (fst <$> s) ++ collectedPats)
+                                (tuplizer (E.Var $ E.Special E.UnitCon) (E.Tuple E.Boxed) $ collectedExps)
+          fixedTuple2 = [| diag |]
+          (arrows,collectedExps,collectedPats) = collectRecData stmt
+          origp = tuplizer E.PWildCard (E.PTuple E.Boxed) collectedPats
+          joinedArrows = foldl1 (*:*) (return . toExp <$> arrows)
+buildD' stmt s = (origp,[| $fixedTuple >>> $(returnQ $ toExp arrow) |])
     where
           fixedTuple = fixTuple (snd <$> s) (tuplizer E.PWildCard (E.PTuple E.Boxed) ( fst <$> s)) exp
           (arrow,exp,origp) = case stmt of
                                (E.Qualifier (E.LeftArrApp arrows f)) -> (arrows,f,E.PWildCard)
                                (E.Generator _ p (E.LeftArrApp arrows f)) -> (arrows,f,p)
-                               (E.LetStmt (E.BDecls [E.PatBind _ p _ (E.UnGuardedRhs f) _])) -> (eId,f,p)
+                               (E.LetStmt (E.BDecls [E.PatBind _ p _ (E.UnGuardedRhs f) _])) -> (eId,f,p) --only 1 let stmt
                                a -> error $ show a
+{-
+fixTuple sourceExpressions sourcePatterns stmtExpression   --< then comes the arrow.
+sourcePatterns,collectedPats -> collectedExps, promoted sourcePatterns
+collectedPats, sourceExpressions -> collectedPats,
+-normStmt s (E.RecStmt statements) = (trim $ collectedPats ++ s,exps)
+-    where
+-        exps = Loop ( Arr [| (\ ($(tupPQ s),$(returnQ $ TildeP $TupP $ collectedPats))
+-                             -> ($(returnQ collectedExps) ,
+-                                 $(tupEQ $ map promote s)) ) |]
+-                     :>>> First arrows
+-                     :>>> Arr [| \($(returnQ $ TildeP $ tuplize TupP $ collectedPats),$(tupPQ $ trim s))
+-                                -> ( $(returnQ $ promote $ partitionStack $ trim (collectedPats ++ s)),
+-                                     $(tupEQ $ map promote collectedPats)) |] )  -- should output, (newstack,collectedPats)
+-
+-        (map toPat . concat -> collectedPats,toExp . tuplize tuple . concat -> collectedExps) = unzip $ map collectRecData statements
+-        arrows = foldr1 (*:*) $ map collectArrows statements
+
+-}
+collectRecData :: E.Stmt -> ([E.Exp],[E.Exp],[E.Pat])
+collectRecData (E.Generator _ pat (E.LeftArrApp arrow expr)) = ([arrow],[expr],[pat])
+collectRecData (E.Qualifier (E.LeftArrApp arrow expr)) = ([arrow],[expr],[E.PWildCard])
+collectRecData (E.LetStmt (E.BDecls decls)) = unzip3 $ map (\(E.PatBind _ p _ (E.UnGuardedRhs rhs) _) -> (eId,rhs,p)) decls
+collectRecData (E.RecStmt stmts) = (\(a,b,c) -> (concat a,concat b,concat c)) $ unzip3 $ map collectRecData stmts
+collectRecData x = error $ "Error in collection of expressions: " ++ show x
+
 eId = E.Var (E.UnQual $ E.Ident "id")
 
 -- Internal Representation

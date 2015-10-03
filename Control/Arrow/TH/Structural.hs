@@ -1,7 +1,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE PatternSynonyms #-}
-module Control.Arrow.TH.Structural (fixTuple) where
+module Control.Arrow.TH.Structural (fixTuple,buildArr) where
 import     Language.Haskell.Exts
 import Language.Haskell.Meta
 import Language.Haskell.TH.Utilities
@@ -30,7 +30,7 @@ fixTuple [] pat exp = buildArr pat exp
 fixTuple es pat@(PApp a [rest]) (App (Con b) rest2) | toName a == toName b = fixTuple es rest rest2 -- removes application of constructor
 fixTuple es PWildCard exp = [| ( $(foldl1 (&:&) es) ) >>> arr (\_ -> $(return $ toExp exp)) |]
 fixTuple es pat@(P a) (EP b rest) = [| $(fixTuple es pat b) &&& $(fixTuple es pat rest) |]  -- diag
-fixTuple es (P a) (E b) | toName a == toName b                 = [| ($(foldl1 (&:&) $ fmap TH.ParensE <$> es)) >>> id|]                                                                  -- id
+fixTuple es (P a) (E b) | toName a == toName b                 = [| ($(foldl1 (&:&) $ fmap TH.ParensE <$> es)) |]                                                                  -- id
                         | otherwise                            = [| ($(foldl1 (&:&) $ fmap TH.ParensE <$> es)) >>> $(buildArr (P a) (E b)) |]  -- arr
 fixTuple es pat b                                              = do
     [|  $(foldl1 (&:&) (fmap TH.ParensE <$> es)) >>> $(buildArr pat b) |]
@@ -44,8 +44,6 @@ buildArr p e | not $ any (flip elem $ freeVars p) (freeVars e)= [| terminate $(r
              >>> arr (\ $(intermediate e) -> $(return $ toExp e)) ) )|] -- >>= return . error .show
              where
                  intermediate vars = return $ tuplizer (TH.TupP []) TH.TupP <$> map (TH.VarP . toName) $ freeVars vars
-
-
 
 (&:&) :: ExpQ -> ExpQ -> ExpQ
 expr1 &:& expr2 = infixE (Just expr1) (varE $ mkName "&&&") (Just expr2)

@@ -61,7 +61,7 @@ m :: FreeCategory (ASyn m) a a
 m = id >>> s >>> id >>> id >>> s >>> s >>> id >>> id >>> id >>> id >>> id >>> s >>> id
 s = FreeCategoryBaseOp (AExp Control.Arrow.CCA.Free.Swap)
 
-g :: ArrowCCA a => a (Int,Int) Int
+g :: (ArrowCCA a,Contract (,) a,Weaken (,) a) => a (Int,Int) Int
 g = $(norm line4)
 
 h = $(norm line7)

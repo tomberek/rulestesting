@@ -2,6 +2,7 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -50,7 +51,11 @@ bifunctor_diag _ = nothing
 
 -- | Special rules for tuples in arr
 bifunctor_arr :: RuleE
-bifunctor_arr [rule| arr (\(x,y) -> (a,z)) |] | x_ == a_ = into [| second (arr (\ $y -> $z)) |]
-                                              | y_ == z_ = into [| first (arr (\ $x -> $a)) |]
-                                              | otherwise = nothing
+bifunctor_arr [rule| (\(x,y) -> (a,z)) |] | x_ == a_ = into [| second (\ $y -> $z) |]
+                                          | y_ == z_ = into [| first (\ $x -> $a) |]
+                                          | otherwise = nothing
+bifunctor_arr [rule| arr (second f) |] = into [| second (arr $f)|]
+bifunctor_arr [rule| arr (first f) |] = into [| first (arr $f)|]
+bifunctor_arr [rule| arr (second f >>> g) |] = into [| second (arr $f) >>> arr $g |]
+bifunctor_arr [rule| arr (first f >>> g) |] = into [| first (arr $f) >>> arr $g |]
 bifunctor_arr _ = nothing

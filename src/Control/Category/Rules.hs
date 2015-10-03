@@ -42,7 +42,10 @@ import Control.Lens.Setter
 import Data.Generics.Multiplate
 
 category_ruleset :: [RuleE]
-category_ruleset = [category_id,category_id_comp,category_leftAssoc]
+category_ruleset = [category_id,category_id_comp,category_rightAssoc]
+
+category_ruleset' :: [RuleE]
+category_ruleset' = [category_id,category_id_comp,category_leftAssoc]
 
 removeAllIds :: FreeCategory cat a b -> FreeCategory cat a b
 removeAllIds = traverseFor catplate (evalFamily removeId)
@@ -67,9 +70,8 @@ pattern a :>>>> b = CategoryOp (a :>>> b)
 pattern Idd = CategoryOp Id
 
 category_id :: RuleE
-category_id [rule| arr (\n -> m) |] | m_ == n_ = into [| id |]
-category_id [rule| \n -> m |] | m_ == n_ = into [| id |]
 category_id [rule| arr id |]             = into [| id |]
+category_id [rule| \n -> m |] | m_ == n_ = into [| id |]
 category_id [rule| returnA |]            = into [| id |]
 category_id [rule| diag >>> fst |]       = into [| id |] --cartesian
 category_id [rule| diag >>> snd |]       = into [| id |]
@@ -87,6 +89,10 @@ category_leftAssoc [rule| (f >>> i) >>> (g >>> h) |] = into [| ($f >>> ($i >>> $
 category_leftAssoc [rule| (f >>> g) >>> h |] = into [| $f >>> ($g >>> $h) |]
 category_leftAssoc a = return Nothing
 
+category_rightAssoc :: RuleE
+category_rightAssoc [rule| (f >>> i) >>> (g >>> h) |] = into [| $f >>> (($i >>> $g) >>> $h) |]
+category_rightAssoc [rule| f >>> (g >>> h) |] = into [| ($f >>> $g) >>> $h |]
+category_rightAssoc a = return Nothing
 {-
 --{-# RULES "arr id" forall n (m :: a->a). arr' n m = trace "fired arr id" id #-}
 {-# RULES "arr id" forall n (m ::forall a b. (a,b)->(a,b)). arr' n m = trace "fired arr id" id #-}

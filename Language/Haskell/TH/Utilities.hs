@@ -16,13 +16,13 @@
 -- translator.
 
 module Language.Haskell.TH.Utilities(
-    FreeVars(freeVars), DefinedVars(definedVars),
+    FreeVars(freeVars), DefinedVars(definedVars),notIn,
     failureFree, irrPat, paren, parenInfixArg,
     tuple, tupleP, tuplizer,
     times,
     hsQuote, hsSplice, quoteArr, quoteInit,     -- for CCA
-    rule,promote,promote',ifM,areExpAEq,expEqual,
-    into,RuleE,nothing
+    rule,promote,promote',promoteE,ifM,areExpAEq,expEqual,
+    into,RuleE,nothing,nameOccursIn
 ) where
 
 import           Data.Generics
@@ -49,6 +49,7 @@ import Prelude hiding (id,(.))
 import Control.Arrow(Arrow(arr),(&&&))
 import GHC.Prim (Any)
 import Data.Coerce
+import Language.Haskell.TH.Desugar(nameOccursIn)
 
 into :: Functor f => f a -> f (Maybe a)
 into = fmap Just
@@ -76,6 +77,19 @@ promote (TH.ParensP pat) = TH.ParensE $ promote pat
 promote (TH.ListP pats) = TH.ListE $ map promote pats
 promote (TH.WildP) = TH.TupE []
 promote x = error $ "pattern promotion not supported for: " ++ show x
+
+promoteE :: Pat -> Exp
+promoteE (PApp _ [pat]) = promoteE pat
+promoteE (PApp _ pats) = Tuple Boxed $ map promoteE pats
+promoteE (PVar n) = Var $ UnQual n
+promoteE (PLit n) = Lit n
+promoteE (PTuple Boxed pats) = Tuple Boxed $ map promoteE pats
+promoteE (PParen pat) = Paren $ promoteE pat
+promoteE (PList pats) = List $ map promoteE pats
+promoteE (PWildCard) = Var $ Special UnitCon
+promoteE x = error $ "pattern promotion not supported for: " ++ show x
+
+
 
 -- | Does not support qualified names or other module matching, only NameS dynamically matched names
 -- so we capture everything dynamically. WARNING, UNSAFE!
@@ -156,6 +170,9 @@ updateParens (TH.ParensE e@(TH.LamE _ _)) = Just e
 updateParens (TH.ParensE (TH.UInfixE a b c)) = Just $ TH.InfixE (Just a) b (Just c)
 updateParens (TH.ParensE (TH.AppE a b)) = Just $ TH.AppE a b
 updateParens n = Nothing
+
+notIn :: [Name] -> [Name] -> Bool
+notIn a b = not $ or $ map (flip elem b) a
 
 -- The set of free variables in some construct.
 class FreeVars a where

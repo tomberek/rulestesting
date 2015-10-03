@@ -16,14 +16,16 @@ import Control.Categorical.Bifunctor
 import Control.Category
 import Prelude hiding (id,(.))
 import qualified Data.Constraint as C
-import Control.Category.Rules (category_ruleset)
+import Control.Category.Rules (category_ruleset,category_ruleset')
 import Control.Category.Associative.Rules (assoc_ruleset)
 import Control.Category.Structural.Rules (struct_ruleset)
 import Control.Categorical.Bifunctor.Rules (bifunctor_ruleset)
 import Control.Arrow.CCA.Free
 import Control.Arrow.CCA.NoQ
 
-catCCA = category $ category_ruleset ++ bifunctor_ruleset ++ assoc_ruleset ++ struct_ruleset ++ cca_ruleset
+catCCA = category $ [] --category_ruleset ++ bifunctor_ruleset ++ assoc_ruleset ++ struct_ruleset ++ cca_ruleset,
+                     --category_ruleset' ++ bifunctor_ruleset ++ assoc_ruleset ++ struct_ruleset ++ cca_ruleset,
+                     --category_ruleset ++ bifunctor_ruleset ++ assoc_ruleset ++ struct_ruleset ++ cca_ruleset]
 
 cca_ruleset = [cca_rulesetT,cca_rulesetT2,cca_rulesetT3,cca_rulesetTerm]
 cca_rulesetT :: RuleE
