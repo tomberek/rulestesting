@@ -44,7 +44,6 @@ line2 = [catCCA| proc g -> id -< () |]
 line3 :: (Weaken (,) a,Category a,ArrowCCA a) => a (Int,Int) Int
 line3 = [catCCA| proc (x,y) -> do
             line1 -< x |]
-
 ---}
 line4 :: (Weaken (,) a,Contract (,) a,Category a,ArrowCCA a,Symmetric (,) a) => a (Int,Int) Int
 line4 = [catCCA| proc (x,y) -> do
@@ -243,7 +242,6 @@ example1 = [arrow|
     |]
 -}
 ---}
-
 
 {-
 example4 :: ArrowCCA a => a Int Int
