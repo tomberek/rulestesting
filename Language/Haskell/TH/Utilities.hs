@@ -21,7 +21,7 @@ module Language.Haskell.TH.Utilities(
     tuple, tupleP, tuplizer,
     times,
     hsQuote, hsSplice, quoteArr, quoteInit,     -- for CCA
-    rule,promote,promote',promoteE,ifM,areExpAEq,expEqual,
+    rule,promote,promoteE,ifM,areExpAEq,expEqual,
     into,RuleE,nothing,nameOccursIn
 ) where
 
@@ -30,25 +30,18 @@ import           Data.List
 import           Data.Char (isLower)
 import           Language.Haskell.Exts.Syntax
 import qualified Language.Haskell.TH as TH
-import Language.Haskell.TH (Q(..),integerL,charL,rationalL)
-import Language.Haskell.TH.Quote
-import Language.Haskell.TH.Syntax (mkOccName,mkPkgName,mkModName,mkNameG_d)
+import Language.Haskell.TH (Q)
+
 import qualified Language.Haskell.TH.Quote as TH
 import qualified Language.Haskell.TH.Syntax as TH
 import           Language.Haskell.TH.Alpha
 import qualified Control.Lens as L
-import qualified Data.Data.Lens as L
 import Language.Haskell.Meta
-import Language.Haskell.Meta.Utils
-import Control.Applicative
-import qualified Data.Constraint as C
+
 import Control.Monad
-import Unsafe.Coerce
 import Control.Category
 import Prelude hiding (id,(.))
-import Control.Arrow(Arrow(arr),(&&&))
-import GHC.Prim (Any)
-import Data.Coerce
+import Control.Arrow((&&&))
 import Language.Haskell.TH.Desugar(nameOccursIn)
 
 into :: Functor f => f a -> f (Maybe a)
@@ -89,45 +82,8 @@ promoteE (PList pats) = List $ map promoteE pats
 promoteE (PWildCard) = Var $ Special UnitCon
 promoteE x = error $ "pattern promotion not supported for: " ++ show x
 
-
-
--- | Does not support qualified names or other module matching, only NameS dynamically matched names
--- so we capture everything dynamically. WARNING, UNSAFE!
-promoteName :: TH.Name -> TH.PatQ
-promoteName (Name s) = [p| TH.Name (TH.OccName $(TH.litP $ TH.stringL s)) _ |] -- >>= return .
-
--- | Of single Var
-promotePat :: TH.Pat -> TH.PatQ
-promotePat (TH.TupP ps) = [p| TH.TupP $(TH.ListP <$> mapM promotePat ps) |] -- >>= return . error . show
-promotePat (TH.VarP (Name s@[t,'_'])) =
-    [p| (promote -> $( [p| (TH.returnQ -> $(TH.varP $ Name s)) |]
-        >>= return . TH.AsP (Name $ s ++ "_"))) |]
-    >>= return. TH.AsP (Name $ [t] ++ "'_")
-
-promote' :: TH.Exp -> TH.PatQ
-promote' (TH.VarE (Name s@[_,'_'])) = [p| (TH.returnQ -> $(TH.varP $ Name s)) |] >>= return . TH.AsP (Name ( s ++ "_"))
-promote' (TH.InfixE (Just e1) o (Just e2)) = [p| TH.UInfixE $(promote' e1) $(promote' o) $(promote' e2) |]
-promote' (TH.UInfixE e1 o e2) = [p| TH.InfixE (Just $(promote' e1)) $(promote' o) (Just $(promote' e2)) |]
-promote' (TH.LamE ps e) = [p| TH.LamE $(TH.ListP <$> mapM promotePat ps) $(promote' e)|] -- >>= return . error . show
-promote' (TH.ParensE e) = promote' e -- parseExp produces an extra parens on a lambda
-promote' (TH.VarE n) = [p| TH.VarE $(promoteName n) |]
-promote' (TH.AppE n e) = [p| TH.AppE $(promote' n) $(promote' e) |]
-promote' (TH.TupE es) = [p| TH.TupE $(TH.ListP <$> mapM promote' es) |]
---promote' a = error $ "promote' does not support conversion of " ++ show a ++ " into a PatQ"
-
 pattern Name s = (TH.Name (TH.OccName s) TH.NameS)
 
-{-
-rule :: TH.QuasiQuoter
-rule = TH.QuasiQuoter {
-        TH.quoteExp = \input -> case parseExp input of
-            Right (everywhere (mkT normaliseName) -> b) -> [| b |]
-            Left c -> error $ "Exp: cannot parse rule pattern: " ++ c ++ " " ++ input
-      , TH.quotePat = \input -> case parseExp input of
-             Right (everywhere (mkT normaliseName) -> b) -> promote' b -- could not figure out a way to do this generically
-             Left c -> error $ "cannot parse rule pattern: " ++ c ++ " " ++ input
-        }
--}
 rule :: TH.QuasiQuoter
 rule = TH.QuasiQuoter{
       TH.quoteExp = \input -> case parseExp input of
@@ -141,11 +97,13 @@ rule = TH.QuasiQuoter{
                   }
 type RuleE = TH.Exp -> Q (Maybe TH.Exp)
 
+updateNameP :: TH.Exp -> Maybe (Q TH.Pat)
 updateNameP (TH.VarE n@(TH.Name (TH.OccName [s]) TH.NameS))
     | isLower s = Just $ [p| (TH.returnQ -> $(TH.varP n)) |] >>= return . TH.AsP (Name [s,'_'])
     | otherwise = Nothing
 updateNameP n = Nothing
 
+updateNameE :: TH.Exp -> Maybe TH.ExpQ
 updateNameE (TH.VarE n@(TH.Name (TH.OccName [s]) TH.NameS))
     | isLower s = Just $ TH.varE n
     | otherwise = Nothing
@@ -290,7 +248,7 @@ instance FreeVars Stmt where
     freeVars (Generator _ p e) = freeVars e -- changed
     freeVars (Qualifier e) = freeVars e
     freeVars (LetStmt bs) = freeVars bs
-    freeVars (RecStmt bs) = freeVars bs
+    freeVars (RecStmt bs) = freeVars bs \\ definedVars bs
 
 instance FreeVars Binds where
     freeVars (BDecls bs) = freeVars bs
@@ -327,6 +285,11 @@ instance DefinedVars Binds where
     definedVars (BDecls ds) = definedVars ds
     definedVars (IPBinds _) = error "definedVars IPBinds not defined"
 
+instance DefinedVars Stmt where
+    definedVars (Generator _ p _) = freeVars p -- changed
+    definedVars (Qualifier e) = []
+    definedVars (LetStmt bs) = definedVars bs
+    definedVars (RecStmt bs) = error $ show $ definedVars bs
 -- Is the pattern failure-free?
 -- (This is incomplete at the moment, because patterns made with unique
 -- constructors should be failure-free, but we have no way of detecting them.)

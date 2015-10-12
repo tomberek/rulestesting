@@ -18,12 +18,14 @@ extra-packages: ! 'Hackage: th-alpha 0.2.0.2
 
 '
 ghc-args:
-- -fdefer-type-errors
 - -fenable-rewrite-rules
 - -fno-max-relevant-binds
 excluded-modules:
 - Arrow.hs
 - Auto.hs
 - Control/Arrow/CCA/Optimize.hs
+- Control/Arrow/TH.hs
+- src/Control/Arrow/CCA/AExp.hs
+- src/Control/Arrow/CCA/NoQ.hs
 - src/Control/Category/Monoidal.hs
 - src/Morte/Core.hs

@@ -16,7 +16,6 @@
 {-# LANGUAGE QuasiQuotes     #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE PatternSynonyms #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
 module Main where
@@ -24,31 +23,9 @@ module Main where
 import           Prelude hiding (id,(.),fst,snd)
 import           Examples
 import           Control.Arrow.CCA.Free
-import Language.Haskell.Meta.Utils
-import Language.Haskell.TH
-import Language.Haskell.TH.Utilities
-import Language.Haskell.TH.Syntax
-import Control.Category
-import Control.Categorical.Bifunctor.Rules
-import Control.Categorical.Bifunctor
-import Control.Applicative
-import qualified Language.Haskell.Exts as E
-import Data.Data
-import qualified Control.Lens as L
-import Data.Typeable
-import Control.Arrow(arr)
-import Data.Generics
-import Control.Arrow.CCA
-import Control.Arrow.CCA.Free(norm)
 import Control.Arrow.CCA.Rules
-import Control.Category.Structural (Contract,(&&&),fst,snd,Weaken)
-import Control.Arrow hiding (second,(***),(&&&))
-import Control.Monad
-import Control.Category.Free
-import Control.Category.Rules
-import Data.Maybe
-deriving instance Show NameFlavour
-deriving instance Show NameSpace
+import Control.Category.Structural
+import Data.Functor.Identity
 {-
 p :: (Arrow a,ArrowCCA a,Contract (,) a,Weaken (,) a) => a (b,c) (b,c)
 p = [catCCA|
@@ -57,40 +34,13 @@ p = [catCCA|
     |]
 -}
 
-m :: FreeCategory (ASyn m) a a
-m = id >>> s >>> id >>> id >>> s >>> s >>> id >>> id >>> id >>> id >>> id >>> s >>> id
-s = FreeCategoryBaseOp (AExp Control.Arrow.CCA.Free.Swap)
-
-g :: (ArrowCCA a,Contract (,) a,Weaken (,) a) => a (Int,Int) Int
-g = $(norm line4)
-
-h = $(norm line7)
-
-undo :: Category cat => FreeCategory cat a b -> cat a b
-undo (FreeCategoryBaseOp c) = c
-undo (CategoryOp Control.Category.Free.Id) = id
-undo (CategoryOp ((undo -> a) Control.Category.Free.:>>> (undo -> b))) = a >>> b
-
+t :: FreeCCA Identity () (,) (->) (Int,Int) Int
+t = $(toExpCCA line3)
 main :: IO ()
 main = do
-    --print $ [| fst >>> arr id >>> arr (+1) |] >>= L.rewriteM reifyLaws
-    --print $ [| id >>> id |] >>= L.rewriteM reifyLaws
-    --print $ [| first id >>> id >>> id |] >>= L.rewriteM reifyLaws
-    --printCCA p
-    --printCCA $ undo $ removeId m
-    --printCCA $ undo $ fromJust $ removeId m
-    --printCCA $ undo $ fromJust $ bottomupM removeId m
-    --printCCA $ undo $ fromJust $ bottomupM removeId id
-    printCCA line4
-    printCCA g
-    printCCA line7
-    printCCA h
-    printCCA $(norm line3)
-    {-
-    printCCA line1
-    printCCA line2
-    printCCA line3
-    ---}
+    print "hi"
+    printExp line3
+    printExp t
     --printCCA line4
     --print "Just proc-do desugar:"
     --printCCA example4b

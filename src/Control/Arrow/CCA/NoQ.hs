@@ -26,7 +26,7 @@ import           Control.Category         (Category)
 import           Control.Concurrent.Async
 import           Control.Monad.Identity
 import           Language.Haskell.TH
-import           Language.Haskell.TH.Syntax(Lift(..))
+
 import Control.Categorical.Bifunctor (Bifunctor,(***),PFunctor,QFunctor)
 import Control.Category.Structural (Weaken)
 import qualified Control.Category.Structural (Weaken(..))

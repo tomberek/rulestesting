@@ -1,7 +1,6 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE ImpredicativeTypes #-}
 {-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -11,10 +10,8 @@
 {-# LANGUAGE TypeFamilies    #-}
 {-# LANGUAGE LambdaCase    #-}
 {-# LANGUAGE AllowAmbiguousTypes    #-}
-{-# LANGUAGE Arrows    #-}
 module Examples where
 import           Control.Arrow.CCA
-import           Control.Arrow.TH
 import           Control.Arrow hiding ((&&&),(***),first,second)
 import           Control.Concurrent          (threadDelay)
 import Control.Concurrent.Async
@@ -24,35 +21,31 @@ import Prelude hiding (id,(.),fst,snd)
 import Control.Category
 import Control.Category.Associative
 import Control.Category.Structural
-import Control.Category.Monoidal
-import Control.Category.Cartesian
+import Control.Category.Structural.Rules
 import Control.Categorical.Bifunctor
-import Language.Haskell.TH.Utilities
 import Language.Haskell.TH.Syntax
-import Language.Haskell.TH.Quote
-import Language.Haskell.TH.Lib
-import Language.Haskell.Meta.Parse
-import Control.Applicative
 import Control.Arrow.CCA.Rules
-line1 :: (Arrow a,Category a,ArrowCCA a) => a b b
-line1 = [catCCA| proc g -> do
-            id -< g|]
+
+line1 :: (Category a) => a b b
+line1 = [structural| proc g -> do
+             id -< g|]
 
 line2 :: (HasTerminal a,Category a) => a Int ()
-line2 = [catCCA| proc g -> id -< () |]
+line2 = [structural| proc g -> id -< () |]
 
-line3 :: (Weaken (,) a,Category a,ArrowCCA a) => a (Int,Int) Int
-line3 = [catCCA| proc (x,y) -> do
+line3 :: (Weaken (,) a,Category a) => a (Int,Int) Int
+line3 = [structural| proc (x,y) -> do
             line1 -< x |]
 ---}
+
 line4 :: (Weaken (,) a,Contract (,) a,Category a,ArrowCCA a,Symmetric (,) a) => a (Int,Int) Int
 line4 = [catCCA| proc (x,y) -> do
-             z <- arr (*2) -< x+1
-             id -< (z+y)
-             |]
+              z <- arr (*2) -< x+1
+              id -< (z+y)
+              |]
 
-line5 :: ArrowCCA a => a (Maybe c) c
-line5 = [catCCA| proc (Just a) -> id -< a |]
+line5 :: Arrow a => a (Maybe c) c
+line5 = [structural| proc (Just a) -> id -< a |]
 
 {-
 line6 :: (Category a) => a (Int,Int) (Int,Int)
@@ -61,7 +54,6 @@ line6 = [catCCA| proc (x,y) -> do
             id -< (z,y)
             |]
 ---}
-
 
 processURL :: String -> IO String
 processURL a = do
@@ -107,10 +99,11 @@ line8 = [catCCA|
         |]
 
 temp :: (Associative (,) a,Contract (,) a,Weaken (,) a) => a ((b,c),d) (c,d)
-temp = [catCCA|
+temp = [structural|
     proc n -> associate >>> snd -< n
     |]
 
+{-
 line9 :: (Associative (,) a,HasTerminal a,Symmetric (,) a,HasIdentity () (,) a,Weaken (,) a,ArrowCCA a,Contract (,) a) => a (c,b) ((),())
 line9 = [catCCA|
     proc (a,b) -> do
@@ -272,7 +265,7 @@ example2 = [catCCA|
             |]
 ---}
 {-
-should be 
+should be
 arr (\ x -> (x+1, x)) >>>
         first f >>>
         arr (\ (y, x) -> (2*y, (x, y))) >>>
@@ -281,14 +274,13 @@ arr (\ x -> (x+1, x)) >>>
         first h >>>
         arr (\ (t, z) -> t+z)
 ---}
-{-
 example1 :: ArrowCCA a => a Int Int
 example1 = [catCCA|
     proc n -> do
         a  <- arr (\x -> x) -< (n::Int)
         rec
             e <- arr (+1) -< a + (1::Int)
-            b <- init 0 -< e
+            b <- delay 0 -< e
         returnA -< b
     |]
 
@@ -300,6 +292,5 @@ i = [catCCA|
         let z = x+y
         returnA -< z
         |]
-
 ---}
 ---}

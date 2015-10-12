@@ -1,4 +1,3 @@
-{-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
@@ -25,7 +24,6 @@ import           Control.Category         (Category)
 import           Control.Concurrent.Async
 import           Control.Monad.Identity
 import           Language.Haskell.TH
-import           Language.Haskell.TH.Syntax(Lift(..))
 
 -- | An @'ArrowCCA'@ is a typeclass that captures causual commutative arrows.
 -- Any instance must also be an instance of 'ArrowLoop'.
@@ -75,4 +73,4 @@ instance ArrowCCA (PKleisli) where
 instance MonadFix m => ArrowCCA (Kleisli m) where
     delay = error "delay for PKleisli not defined"
     type M (Kleisli m) = m
-    arrM f = Kleisli f
+    arrM = Kleisli
