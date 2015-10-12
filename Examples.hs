@@ -47,13 +47,11 @@ line4 = [catCCA| proc (x,y) -> do
 line5 :: Arrow a => a (Maybe c) c
 line5 = [structural| proc (Just a) -> id -< a |]
 
-{-
 line6 :: (Category a) => a (Int,Int) (Int,Int)
 line6 = [catCCA| proc (x,y) -> do
             z <- id -< x
             id -< (z,y)
             |]
----}
 
 processURL :: String -> IO String
 processURL a = do
@@ -65,7 +63,7 @@ processURL a = do
 getURLSum :: (M a ~ IO,ArrowCCA a) => a String Int
 getURLSum = [catCCA| (arrM processURL) >>> (arr length) |]
 
-line7 :: (M a ~ IO, ArrowCCA a,Weaken (,) a,Symmetric (,) a,Contract (,) a) => a (String,String) Int
+line7 :: (M a ~ IO,ArrowCCA a,Weaken (,) a,Symmetric (,) a,Contract (,) a) => a (String,String) Int
 line7 = [catCCA|
     proc (x,y) -> do
         a <- getURLSum -< y

@@ -23,9 +23,11 @@ module Main where
 import           Prelude hiding (id,(.),fst,snd)
 import           Examples
 import           Control.Arrow.CCA.Free
+import           Control.Arrow.CCA
 import Control.Arrow.CCA.Rules
 import Control.Category.Structural
 import Data.Functor.Identity
+import Control.Arrow(Kleisli(..))
 {-
 p :: (Arrow a,ArrowCCA a,Contract (,) a,Weaken (,) a) => a (b,c) (b,c)
 p = [catCCA|
@@ -34,28 +36,17 @@ p = [catCCA|
     |]
 -}
 
-t :: FreeCCA Identity () (,) (->) (Int,Int) Int
-t = $(toExpCCA line3)
+--t :: Weaken (,) a => a (Int,Int) Int
+--t = $(toExpCCA (line3 :: FreeCCA Identity () (,) (->) (Int,Int) Int))
+t2 :: (IO ~ M a) => a (String,String) Int
+t2 = $(toExpCCA (line7 :: FreeCCA IO () (,) (Kleisli IO) (String,String) Int))
+
 main :: IO ()
 main = do
     print "hi"
     printExp line3
-    printExp t
-    --printCCA line4
-    --print "Just proc-do desugar:"
-    --printCCA example4b
-    --print "CCA optimized:"
-
-    --printCCA ( $(norm example4b))
-    --print "Just proc-do desugar:"
-    
-    --print "CCA optimized:"
-    --printCCA ( $(norm line1))
-    --putStrLn ""
-    --print "Just proc-do desugar:"
-    --printCCA line2
-    --print "CCA optimized:"
-    --printCCA ($(norm line2))
+    --printExp t
+    printExp (line7 :: FreeCCA IO () (,) (Kleisli IO) (String,String) Int)
     --print "Autos running in parallel"
     --let a = $(norm line2) :: AutoXIO (String,String) Int
     --    b = runAutoIO_ a

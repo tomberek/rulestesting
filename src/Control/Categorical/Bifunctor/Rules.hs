@@ -51,18 +51,6 @@ instance Multiplate BiPlate where
         (\a b -> build expr (FreeBifunctorCategoryOp (a :>>> b)))
         (\a -> build expr (FreeBifunctorBaseOp a))
         (\a b -> build expr (BifunctorOp (a :*** b)))
-    --mkPlate build = BiPlate (build biplate)
-
---convertPlate :: Category cat => BiPlate (Constant (cat a b))
-{-
-buildBi :: Applicative f => BiPlate f -> FreeBifunctor p cat a b -> f (FreeBifunctor p cat a b)
-buildBi _ x@(FreeBifunctorBaseOp _) = pure x
-buildBi plate x@(FreeBifunctorCategoryOp Id) = pure x
-buildBi plate (FreeBifunctorCategoryOp (a :>>> b)) = (FreeBifunctorCategoryOp ... (:>>>)) <$> biplate plate a <*> biplate plate b
-buildBi plate (BifunctorOp (a :*** b)) = (BifunctorOp ... (:***)) <$> biplate plate a <*> biplate plate b
-
-
--}
 
 bifunctor_ruleset :: [Exp -> Q (Maybe Exp)]
 bifunctor_ruleset = [bifunctor_id,bifunctor_id_f,bifunctor_f_id,bifunctor_diag,bifunctor_arr,bifunctor_remove]

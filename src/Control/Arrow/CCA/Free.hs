@@ -41,6 +41,7 @@ import Language.Haskell.TH.Quote
 import Language.Haskell.Meta.Utils
 import Control.Arrow.CCA -- no Q or with Q?
 import Control.Arrow hiding ((&&&),(***),first,second)
+import qualified Control.Arrow (Arrow(..))
 import qualified Control.Category as Q
 import Data.List (filter,partition)
 import Language.Haskell.TH.Utilities
@@ -67,7 +68,7 @@ import Control.Category.Associative.Free
 import Control.Category.Structural.Free
 import Control.Category.Monoidal.Free
 import Data.Generics.Multiplate
---import Control.Arrow.CCA.AExp(fixity,areExpAEq',simplify,printCCA)
+import Control.Arrow.CCA
 import Data.Functor.Constant
 
 parseMode :: E.ParseMode
@@ -133,6 +134,23 @@ fixity = G.everywhere (G.mkT expf)
           expf (InfixE (Just l) oper (Just (ParensE r))) = InfixE (Just l) oper (Just r)
           expf e = e
 
+-- | Replaces expressions of `arr`, `arrM`, `delay`, and `returnA` with
+-- the versions that have their arguments lifted to TH.
+arrFixer' :: Exp -> ExpQ
+arrFixer' = rewriteM arg
+    where
+        arg (AppE (VarE (Name (OccName "arr'") _)) e) =
+            Just <$> [| arr $(returnQ e) |]
+        arg (AppE (VarE (Name (OccName "arrM'") _)) e) =
+            Just <$> [| arrM $(returnQ e) |]
+        arg (AppE (VarE (Name (OccName "delay'") _)) e) =
+            Just <$> [| delay $(returnQ e) |]
+        arg (VarE (Name (OccName "returnA") _)) =
+            Just <$> [| id |]
+        arg (AppE (VarE (Name (OccName "terminate'") _)) e) =
+            fmap Just [| terminate $(returnQ e) |]
+        arg _ = return Nothing
+
 buildA :: E.Exp -> ExpQ
 buildA (E.Proc _ pat expr) = buildB pat expr
 buildA expr = return $ toExp expr
@@ -194,14 +212,14 @@ eId :: E.Exp
 eId = E.Var (E.UnQual $ E.Ident "id")
 
 data ArrowOp (k:: * -> * -> *) a b where
-    Arr :: (a -> b) -> ArrowOp k a b
+    Arr :: k a b -> ArrowOp k a b
     Arr' :: ExpQ -> k a b -> ArrowOp k a b
 data CCAOp m i (p:: * -> * -> *) (k:: * -> * -> *) a b where
     Delay :: ExpQ -> CCAOp m i p k a a
     Delay' :: ExpQ -> a -> CCAOp m i p k a a
     LoopD :: ExpQ -> ExpQ -> CCAOp m i p k a b
     ArrM  :: ExpQ -> CCAOp m i p k a b
-    ArrM'  :: ExpQ -> (a -> m b) -> CCAOp m i p k a b
+    ArrM'  :: ExpQ -> k a (m b) -> CCAOp m i p k a b
 data TerminateOp (k :: * -> * -> *) a i where
     Terminate :: i -> TerminateOp k a i
     Terminate' :: ExpQ -> i -> TerminateOp k a i
@@ -254,7 +272,7 @@ instance Multiplate CCAPlate where
         a@(FreeCCAOp _) -> pure a
     mkPlate build = CCAPlate $ build catplate
 
-printExp :: FreeCCA Identity () (,) (->) a b -> IO ()
+printExp :: FreeCCA m () (,) k a b -> IO ()
 printExp x = runQ (foldFor catplate toExp' x) >>= putStrLn . simplify . pprint
 
 toExp' :: CCAPlate (Constant ExpQ)
@@ -355,3 +373,16 @@ instance HasIdentity i p (FreeCCA m i p k)
 
 instance Monoidal i p (FreeCCA m i p k)
 instance Cartesian i p (FreeCCA m i p k)
+
+instance Arrow k => Arrow (FreeCCA m i (,) k) where
+    arr _ = error "only defined for arr'"
+    first a = FreeCCAPfunctorOp (First a)
+instance ArrowLoop k => ArrowLoop (FreeCCA m i (,) k) where
+    loop x = error "only defined for loopD"
+instance (m ~ M k,ArrowCCA k,Arrow k) => ArrowCCA (FreeCCA m i (,) k) where
+    type M (FreeCCA m i (,) k) = m
+    arr' x y = FreeCCAArrowOp $ Arr' x (arr y)
+    arrM' x y = FreeCCAOp $ ArrM' x (arr y)
+    arrM x = error "only defined for arrM'"
+    delay' x y = FreeCCAOp $ Delay' x y
+    delay x = error "only defined for delay'"

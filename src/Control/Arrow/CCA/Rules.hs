@@ -26,9 +26,10 @@ import Data.Generics.Multiplate
 import Control.Arrow.CCA
 import Control.Monad
 
-toExpCCA :: FreeCCA Identity () (,) (->) a b -> ExpQ
+toExpCCA :: FreeCCA m i p k a b -> ExpQ
 toExpCCA a = do
     a' <- foldFor catplate toExp' a
+    reportError $ show a
     foldM transformExp a' all_cca
 
 catCCA :: QuasiQuoter
