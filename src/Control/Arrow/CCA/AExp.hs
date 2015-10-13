@@ -1,223 +1,26 @@
-{-# LANGUAGE StandaloneDeriving #-}
-{-# LANGUAGE DeriveDataTypeable #-}
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE ImpredicativeTypes #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE KindSignatures #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE CPP #-}
-{-# LANGUAGE GADTs #-}
 {-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE ViewPatterns #-}
-{-# LANGUAGE PatternSynonyms #-}
-{-# LANGUAGE LambdaCase #-}
-{- |
-Module      :  Control.Arrow.TH
-Description :  Arrow notation QuasiQuoter
-Copyright   :  (c) 2015 Thomas Bereknyei
-License     :  BSD3
-Maintainer  :  Thomas Bereknyei <tomberek@gmail.com>
-Stability   :  unstable
-Portability :  TemplateHaskell,QuasiQuotes,ViewPatterns
-
--}
-module Control.Arrow.TH (
-    arrow2,printCCA,into,buildA,
-    cleanNames,parseMode,arrFixer,fixity,
-    AExp(..),ASyn(..),fromAExp,findM,
-    areExpAEq',eqM,simplify,rules,category,C.Dict(..),
-    norm
-    ) where
-import qualified Language.Haskell.Exts as E
-import Unsafe.Coerce
-
+module Control.Arrow.CCA.AExp (fixity,simplify,printCCA,areExpAEq',fromCCA,fromASyn,fromAExp) where
+import Prelude hiding (id,(.),fst,snd)
 import Control.Category
-import Language.Haskell.Meta
-import Language.Haskell.TH
-import Language.Haskell.TH.Syntax
-import Language.Haskell.TH.Quote
-import Language.Haskell.Meta.Utils
-import Language.Haskell.Meta.Parse
-import Control.Arrow.CCA
-import Control.Arrow hiding ((&&&),(***),first,second)
-import qualified Control.Category as Q
-import Data.List (filter,partition,foldr,mapAccumL,findIndices,elemIndex,(\\),(!!),delete,nub,find)
---import Data.Graph
-
---import Data.IntMap hiding (map)
-import Data.Function(on)
-import Language.Haskell.TH.Utilities
---import qualified Data.Set as Set
-import Data.Maybe
-import qualified Debug.Trace
-import Control.Lens hiding (Bifunctor)
-import Control.Applicative
-import Control.Arrow.TH.Structural
-
-import qualified Control.Lens as L
-import Control.Category.Associative
-import Control.Category.Structural
-import Control.Category.Monoidal
-import Control.Category.Cartesian
 import Control.Categorical.Bifunctor
-import           Control.Category
-import           Prelude             hiding (id, (.),fst,snd)
-import           Control.Arrow hiding (first,second,(***),(&&&))
-import qualified Control.Arrow as A
-import Control.Monad(liftM,(>=>),(>>),msum,mplus)
-import Data.Data (Data(..))
-import qualified Data.Generics       as G (everywhere,everywhereM,mkT)
-import           Data.Char           (isAlpha)
-import Data.Generics.Aliases
---import Control.CCA.Normalize
-import Data.Typeable
+import Control.Category.Monoidal
+import Control.Category.Structural
+import Control.Arrow.CCA
+import Control.Arrow hiding (first,second,(***),(&&&))
+import Control.Arrow (Arrow(..))
+import Language.Haskell.TH
+import Control.Monad
 import Data.Data
-import qualified Data.Constraint as C
-import Control.Monad.Trans.Maybe
-
-parseMode = E.defaultParseMode{E.extensions=[E.EnableExtension E.Arrows],E.fixities=Just (E.baseFixities)}
-
-arrow2 :: QuasiQuoter
-arrow2 = QuasiQuoter {
-  quoteExp = \input -> case E.parseExpWithMode parseMode input of
-      E.ParseOk result -> do
-          res <- buildA result
-          --res2 <- L.rewriteM (reifyAlpha' ruleSet) res
-          --reportWarning $ show res
-          let res' = TExp res
-          --res2 <- (dataToTExpQ' (const Nothing `extQ` d) (res'))
-          --reportWarning $ show res4
-          return $ res
-      E.ParseFailed l err -> error $ "arrow QuasiQuoter: " ++ show l ++ " " ++ show err
-  , quotePat = error "cannot be patterns."
-  , quoteDec = \input -> case E.parseDeclWithMode parseMode input of
-      E.ParseOk result -> undefined
-      E.ParseFailed l err -> error $ "arrow QuasiQuoter in Decl: " ++ show l ++ " " ++ show err
-  , quoteType = error "cannot be types."
-    }
-    where parseMode = E.defaultParseMode{E.extensions=[E.EnableExtension E.Arrows],E.fixities=Just (E.baseFixities)}
-
---category :: C.Dict (con a) -> [(con a => TExp (a b c) -> (Q (TExp (a b c))))] -> QuasiQuoter
-category :: [Exp -> Q (Maybe Exp)] -> QuasiQuoter
-category rules = QuasiQuoter {
-  quoteExp = \input -> case E.parseExpWithMode parseMode input of
-      E.ParseOk result -> do
-          res <- buildA result
-          --res2 <- L.rewriteM (reifyAlpha' ruleSet) res
-          --reportWarning $ show res
-          --let [a,b] = unTypeRule s <$> rules
-          --let ruleTs :: Data a => a -> Q a
-           --     ruleTs = return `extM` a `extM` b
-          let
-              r exp = (runMaybeT . msum $ ( MaybeT . fmap cleanNames . (fmap.fmap) (transform fixity) . flip ($) exp) <$> rules)
-              res2 = transform fixity $ cleanNames res
-          reportWarning $ "built" ++ show res2
-          res3 <- rewriteM r res2
-          return res3 >>= arrFixer'
-      E.ParseFailed l err -> error $ "arrow QuasiQuoter: " ++ show l ++ " " ++ show err
-  , quotePat = error "cannot be patterns."
-  , quoteDec = error "category: cannot by dec"
-  , quoteType = error "cannot be types."
-    }
-     where parseMode = E.defaultParseMode{E.extensions=[E.EnableExtension E.Arrows],E.fixities=Just (E.baseFixities)}
-
--- | Replaces expressions of `arr`, `arrM`, `delay`, and `returnA` with
--- the versions that have their arguments lifted to TH.
-arrFixer :: Exp -> ExpQ
-arrFixer = rewriteM arg
-    where
-        arg (AppE (VarE (Name (OccName "arr") _)) e) =
-            fmap Just [| arr' (returnQ $(lift e)) $(returnQ e) |]
-        arg (AppE (VarE (Name (OccName "arrM") _)) e) =
-            fmap Just [| arrM' (returnQ $(lift e)) $(returnQ e) |]
-        arg (AppE (VarE (Name (OccName "delay") _)) e) =
-            fmap Just [| delay' (returnQ $(lift e)) $(returnQ e) |]
-        arg (VarE (Name (OccName "returnA") _)) =
-            fmap Just [| arr' (returnQ $([| Q.id |] >>= lift)) Q.id |]
-        arg (AppE (ConE (Name (OccName "Lift") _)) e) =   -- Huh?
-            fmap Just $ returnQ e
-        arg (AppE (VarE (Name (OccName "terminate") _)) e) =
-            fmap Just [| terminate' (returnQ $(lift e)) $(returnQ e) |]
-        arg _ = return Nothing
-
-arrFixer' :: Exp -> ExpQ
-arrFixer' = rewriteM arg
-    where
-        arg (AppE (VarE (Name (OccName "arr") _)) e) =
-            fmap Just [| arr' ($(lift e)) $(returnQ e) |]
-        arg (AppE (VarE (Name (OccName "arrM") _)) e) =
-            fmap Just [| arrM' ($(lift e)) $(returnQ e) |]
-        arg (AppE (VarE (Name (OccName "delay") _)) e) =
-            fmap Just [| delay' ($(lift e)) $(returnQ e) |]
-        arg (VarE (Name (OccName "returnA") _)) =
-            fmap Just [| arr' ($([| Q.id |] >>= lift)) Q.id |]
-        arg (AppE (ConE (Name (OccName "Lift") _)) e) =   -- Huh?
-            fmap Just $ returnQ e
-        arg (AppE (VarE (Name (OccName "terminate") _)) e) =
-            fmap Just [| terminate' ($(lift e)) $(returnQ e) |]
-        arg _ = return Nothing
-
-buildA :: E.Exp -> ExpQ
-buildA (E.Proc _ pat exp) = buildB pat exp
-buildA exp = return $ toExp exp -- only process Arrow proc notation
-
-pattern P p <- (toPat -> p)
-pattern E e <- (toExp -> e)
-pattern R r <- (return -> r)
-pattern RP p <- (return . toPat -> p)
-pattern RE e <- (return . toExp -> e)
-
-buildB :: E.Pat -> E.Exp -> ExpQ
-buildB pat (E.Do exps) = snd $ head final
-    where rest = buildC (init exps) [(pat,[|id|])]
-          final = buildC [last exps] rest
-buildB p (E.LeftArrApp (return . toExp -> arrow) e) = [| $(buildArrow p e) >>> $arrow |]
-buildB a b = error $ "Not supported B: " ++ show (a,b)
-
-buildC :: [E.Stmt] -> [(E.Pat,ExpQ)] -> [(E.Pat,ExpQ)]
-buildC [] exps = exps
-buildC stmts exps = if null goals then error "cannot make progress" else buildC rest (newExps ++ exps)
-    where (goals,rest) = Data.List.partition (all (flip elem $ freeVars $ fst <$> exps) . freeVars) stmts
-          sources :: [(E.Stmt,[(E.Pat,ExpQ)])] -- statements that can be built with their dependencies
-          sources = zip goals $ sourceGetter <$> goals
-          sourceGetter :: E.Stmt -> [(E.Pat,ExpQ)]
-          sourceGetter (freeVars -> s) = Data.List.filter (any (flip elem s) . freeVars . fst) exps
-          newExps = map (uncurry buildD') sources
-
-(*:*) :: ExpQ -> ExpQ -> ExpQ
-expr1 *:* expr2 = infixE (Just expr1) (varE $ mkName "***") (Just expr2)
-(&:&) :: ExpQ -> ExpQ -> ExpQ
-expr1 &:& expr2 = infixE (Just expr1) (varE $ mkName "&&&") (Just expr2)
-
-buildD' :: E.Stmt -> [(E.Pat,ExpQ)] -> (E.Pat,ExpQ)
-buildD' stmt s = (out,[| $(foldl1 (&:&) (snd <$> s)) >>> $out2 |]) -- NOTE: Assumes &&& is available, fix with weakening laws?
-    where (out,out2) = buildD (tuplizer E.PWildCard (E.PTuple E.Boxed) $ fst <$> s) stmt
-
-buildD :: E.Pat -> E.Stmt -> (E.Pat,ExpQ)
-buildD p (E.Qualifier      (E.LeftArrApp (return . toExp -> a) e )) = (E.PWildCard,[| $(buildArrow p e) >>> $a |])
-buildD p (E.Generator _ p3 (E.LeftArrApp (return . toExp -> a) e )) = (p3,         [| $(buildArrow p e) >>> $a |])
-
-buildArrow :: E.Pat -> E.Exp -> ExpQ
-buildArrow E.PWildCard e= [| terminate $(return $ toExp e) |]
-buildArrow p e | not $ any (flip elem $ freeVars p) (freeVars e)= [| terminate $(return $ toExp e) |]
-               | otherwise = [| arr (\ $(return $ toPat p) ->
-                   $(promote <$> intermediate p))
-                   >>> arr (\ $(intermediate  p) -> $(promote <$> intermediate e))
-               >>> arr (\ $(intermediate e) -> $(return $ toExp e)) |] -- >>= return . error .show
-               where
-                   intermediate vars = return $ tuplizer (TupP []) TupP <$> map (VarP . toName) $ freeVars vars
-
-                                    {-
-process ps (E.Proc _ b c) = Debug.Trace.trace (show b) $ process (ProcN 0 b (E.List []) [|Q.id|] : ps) c
-process ps (E.Do statements) = (buildGr allNodes , fromAscList $ zip (view i <$> allNodes) allNodes)
-    makeNodes ind (E.Generator _ p (E.LeftArrApp (returnQ . toExp -> e1) e2)) = (ind+1,StmtN ind p e2 e1)
-    makeNodes ind (E.Qualifier (E.LeftArrApp (returnQ . toExp -> e1) e2)) = (ind+1,CmdN ind E.PWildCard e2 e1)
-        ---}
-
+import qualified Data.Generics as G
+import Language.Haskell.TH.Alpha
+import Control.Applicative
+import Data.List
+import qualified Debug.Trace
+import Data.Char (isAlpha)
 -- Internal Representation
 -- =======================
 -- We use AExp to syntactically represent an arrow for normalization purposes.
@@ -241,7 +44,7 @@ data AExp
   | Snd
   -- Associative (not used much yet)
   | Associate
-  | Disassociate
+  | Coassociate
   -- Braided and Symmetric
   | Swap
   | Second AExp
@@ -251,22 +54,14 @@ data AExp
   | Coidl
   | Coidr
   | Terminate ExpQ
-  deriving (Typeable)
+  --deriving (Typeable,Data)
   {- Closed, not needed
   | Apply -- (f,a) = f a   arr (\(f,a)->f a)
   | Curry
   | Uncurry
   -}
-
-instance L.Plated AExp where
-    plate f (First e) = First <$> f e
-    plate f (Second e) = Second <$> f e
-    plate f (a :>>> b) = (:>>>) <$> f a <*> f b
-    plate f (a :*** b) = (:***) <$> f a <*> f b
-    plate f (a :&&& b) = (:&&&) <$> f a <*> f b
-    plate f (Loop e) = Loop <$> f e
-    plate f (Lft e) = Lft <$> f e
-    plate _ e = pure e
+--instance L.Plated AExp
+---}
 
 areExpAEq' :: Q Exp -> Q Exp -> Q Bool
 areExpAEq' f g = do
@@ -281,6 +76,8 @@ areExpAEq' f g = do
 fixity :: Data a => a -> a
 fixity = G.everywhere (G.mkT expf)
     where expf (UInfixE l op r) = InfixE (Just l) op (Just r)
+          expf (InfixE (Just (ParensE l)) op (Just r)) = InfixE (Just l) op (Just r)
+          expf (InfixE (Just l) op (Just (ParensE r))) = InfixE (Just l) op (Just r)
           expf e = e
 fixity' :: Data a => a -> a
 fixity' = G.everywhere (G.mkT expf)
@@ -306,7 +103,7 @@ eqM Fst Fst = return True
 eqM Snd Snd = return True
 eqM (Lift f) (Lift g) = areExpAEq' f g
 eqM Associate Associate = return True
-eqM Disassociate Disassociate = return True
+eqM Coassociate Coassociate = return True
 eqM Swap Swap = return True
 eqM Coidl Coidl = return True
 eqM Coidr Coidr = return True
@@ -327,7 +124,7 @@ instance Eq AExp where
     Fst == Fst = True
     Snd == Snd = True
     Associate == Associate = True
-    Disassociate == Disassociate = True
+    Coassociate == Coassociate = True
     Swap == Swap = True
     Coidl == Coidl = True
     Coidr == Coidr = True
@@ -350,7 +147,7 @@ instance Show AExp where
     show Idr = "Idr"
     show Idl = "Idl"
     show Associate = "Associate"
-    show Disassociate = "Disassociate"
+    show Coassociate = "Disassociate"
     show (Arr _) = "Arr"
     show (First f) = "First " ++ show f
     show (Second f) = "Second " ++ show f
@@ -417,9 +214,11 @@ instance ArrowCCA (ASyn m) where
 --'+++' is also redefined here for completeness.
 instance Monad m => ArrowChoice (ASyn m) where
     left (AExp f) = AExp (Lft f)
-    right f = arr' [| mirror |] mirror >>> left f >>> arr' [| mirror |] mirror
+    --right f = arr' [| mirror |] mirror >>> left f >>> arr' [| mirror |] mirror
+    right f = arr mirror >>> left f >>> arr mirror
     f +++ g = left f >>> right g
-    f ||| g = f +++ g >>> arr' [| untag |] untag
+    --f ||| g = f +++ g >>> arr' [| untag |] untag
+    f ||| g = f +++ g >>> arr untag
 mirror :: Either b a -> Either a b
 mirror (Left x) = Right x
 mirror (Right y) = Left y
@@ -429,7 +228,7 @@ untag (Right y) = y
 
 -- Pretty printing AExp.
 printCCA :: ASyn m t t1 -> IO ()
-printCCA (AExp x) = runQ (fromAExp x) >>= putStrLn . pprint -- simplify . pprint
+printCCA (AExp x) = runQ (fromAExp x) >>= putStrLn . simplify . pprint -- simplify . pprint
 
 -- Normalization
 -- =============
@@ -444,8 +243,8 @@ rules = [
         , ([| \(a,b) -> (a,b)|],Id)
         , ([| \(a,(b,c)) -> (a,(b,c))|],Id)
         , ([| \((a,b),c) -> ((a,b),c)|],Id) -- so far only two levels
-        , ([| \a -> () |],Terminate [|()|])
-        , ([| \a -> ((),()) |],Terminate [|()|] :*** Terminate [|()|])
+        , ([| \a -> () |],Terminate $ tupE [])
+        , ([| \a -> ((),()) |],Terminate (tupE []) :*** Terminate (tupE []))
         , ([| \a -> (a,a)|],Diag)
         , ([| \(a,b) -> a|],Fst)
         , ([| arr fst |],Fst)
@@ -454,7 +253,7 @@ rules = [
         , ([| \(a,b) -> (b,a)|],Swap)
         , ([| arr swap |],Swap)
         , ([| arr (\(a,b) -> (b,a))|],Swap)
-        , ([| \(a,(b,c)) -> ((a,b),c)|],Disassociate)
+        , ([| \(a,(b,c)) -> ((a,b),c)|],Coassociate)
         , ([| \((a,b),c) -> (a,(b,c))|],Associate) -- so far only first levels
         -- experimental. can this be automated?
         , ([| \(a,b) -> (a,a) |],Fst :>>> Diag)
@@ -484,7 +283,7 @@ fromAExp Diag = [| diag |]
 fromAExp Fst = [| fst |]
 fromAExp Snd = [| snd |]
 fromAExp Associate = [| arr (\((a,b),c)->(a,(b,c))) |]
-fromAExp Disassociate = [| arr (\(a,(b,c))->((a,b),c)) |]
+fromAExp Coassociate = [| arr (\(a,(b,c))->((a,b),c)) |]
 fromAExp Swap = [| swap |]
 fromAExp Coidr = [| coidr |]
 fromAExp Coidl = [| coidl |]
@@ -493,48 +292,45 @@ fromAExp Idr = [| idr |]
 fromAExp (Terminate a) = [| terminate $a |]
 
 -- Should not be arround after second rewrite pass:
-fromAExp (Arr f) = appE [|arr|] f
-fromAExp (First f) = appE [|first|] (fromAExp f)
-fromAExp (Second f) = appE [|second|] (fromAExp f)
+fromAExp (Arr f) = [|arr $f |]
+fromAExp (First f) = appE [|Control.Categorical.Bifunctor.first|] (fromAExp f)
+fromAExp (Second f) = appE [|Control.Categorical.Bifunctor.second|] (fromAExp f)
 fromAExp (f :>>> g) = infixE (Just (fromAExp f)) [|(>>>)|] (Just (fromAExp g))
 fromAExp (Loop f) = appE [|loop|] (fromAExp f)
-fromAExp (LoopD i f) = appE (appE [|loopD|] i) f
-fromAExp (ArrM i) = appE [|arrM|] i
-fromAExp (Delay i) = appE [|delay|] i
+fromAExp (LoopD i f) = [|loopD $i $f |]
+fromAExp (ArrM i) = [|arrM $i |]
+fromAExp (Delay i) = [|delay $i |]
 fromAExp (Lft f) = appE [|left|] (fromAExp f)
 fromAExp (Lift f) = f
-fromAExp (f :*** g) = infixE (Just (fromAExp f)) [|(***)|] (Just (fromAExp g)) -- Not in original CCA. 2015-TB
-fromAExp (f :&&& g) = infixE (Just (fromAExp f)) [|(&&&)|] (Just (fromAExp g)) -- Not in original CCA. 2015-TB
+fromAExp (f :*** g) = infixE (Just (fromAExp f)) [|(Control.Categorical.Bifunctor.***)|] (Just (fromAExp g)) -- Not in original CCA. 2015-TB
+fromAExp (f :&&& g) = infixE (Just (fromAExp f)) [|(Control.Category.Structural.&&&)|] (Just (fromAExp g)) -- Not in original CCA. 2015-TB
 
+fromASyn (AExp a) = fromAExp a
 
 
 -- | norm is a TH function that normalizes a given CCA, e.g., $(norm e) will
 -- give the CCNF of e.
 norm :: ASyn t t1 t2 -> Q Exp
-norm (AExp e) = normalizeQ e >>= fromAExp >>= arrFixer
+norm (AExp e) = fromAExp (normalize e) -- >>= arrFixer
 
--- | Two stage normalization. First uses skew-monoidal category rewrite rules (not fully implemented yet)
--- as well as the CCA optimizations (perhaps do CCC first, then CCA?) and then finishes by converting all
--- categorical constructors back into CCA-compatable forms.
-normalizeQ :: AExp -> Q AExp
-normalizeQ input = Debug.Trace.trace (show input ++ "  <--  starting") $ L.rewriteM (normalizeReifyAlpha normalizeTrace) input
-               >>= L.rewriteM (normalizeReifyAlpha normalizeA)
+{-
 
 -- | Finds all instances of patterns that match the rule-set and converts Arr's to categorical operators if possible.
 normalizeReifyAlpha :: (AExp -> AExp) -> AExp -> Q (Maybe AExp)
 normalizeReifyAlpha _ (Arr e) = findM (\(a,b) -> ifM (areExpAEq' e a) (return $ Just b) $ return Nothing) rules
 normalizeReifyAlpha normRules e = ifM (eqM e n) (return Nothing) (return $ Just n)
                         where n = normRules e
+                              -}
 
 -- normOpt returns the pair of state and pure function as (s, f) from optimized
 -- CCNF in the form loopD i (arr f).
 normOpt :: ASyn m a b -> ExpQ
 normOpt (AExp e) = do
-    e' <- normalizeQ e
+    let e' = normalize e
     case e' of
-      LoopD i f -> tupE [i, f]
-      Arr f     -> [| ( (), $(f) ) |]
-      ArrM f  -> [| ( (), $(f) ) |]
+      LoopD i f -> tupE [i,f]
+      Arr f     -> [| ( (), $f ) |]
+      ArrM f  -> [| ( (), $f ) |]
       --g -> [| ( (), $(fromAExp g) ) |] -- perhaps just expose best effort function?
       g -> error $ "Perhaps not causual? Can't optimize past: " ++ show g
 
@@ -560,9 +356,9 @@ normalize (Second Id) = Id
 normalize (Lft Id) = Id
 
 -- | Terminal
---normalize (f :>>> Terminate) = Terminate
---normalize (f :>>> (Terminate :*** Terminate)) = Terminate :*** Terminate
---normalize (f :>>> (Terminate :&&& Terminate)) = Terminate :&&& Terminate
+normalize (f :>>> Terminate g) = Terminate g
+normalize (f :>>> (Terminate g :*** Terminate h)) = Terminate g :*** Terminate h
+normalize (f :>>> (Terminate g :&&& Terminate h)) = Terminate g :&&& Terminate h
 
 -- Cartesian
 normalize (Diag :>>> Fst) = Id
@@ -575,8 +371,8 @@ normalize ((f :*** g) :>>> Snd) = Snd :>>> g
 normalize ((f :*** g) :>>> Fst) = Fst :>>> f
 normalize ((f :&&& g) :>>> Snd) = g
 normalize ((f :&&& g) :>>> Fst) = f
-normalize (Fst :&&& Snd) = Id :*** Id
-normalize (Snd :&&& Fst) = Swap :>>> Id :*** Id
+normalize (Fst :&&& Snd) = Id
+normalize (Snd :&&& Fst) = Swap
 normalize ((Fst :>>> f) :&&& Snd) = f :*** Id
 normalize ((Snd :>>> f) :&&& Fst) = Swap :>>> f :*** Id
 normalize (Fst :&&& (Snd :>>> f)) = Id :*** f
@@ -585,7 +381,12 @@ normalize (Id :&&& Id) = Diag
 normalize ((f :&&& g) :>>> Swap) = g :&&& f
 normalize (Id :&&& g) = Diag :>>> Second g
 normalize (f :&&& Id) = Diag :>>> First f
-normalize ((Diag :>>> f) :&&& (Diag :>>> g)) = Diag :>>> (f :&&& g)
+normalize w@((x :>>> f) :&&& (y :>>> g)) | x ==y = x :>>> (f :&&& g)
+                                         | otherwise = w
+normalize w@(x :&&& (y :>>> g)) | x ==y = x :>>> (Id :&&& g)
+                                | otherwise = w
+normalize w@((x :>>> f) :&&& y) | x ==y = x :>>> (f :&&& Id)
+                                | otherwise = w
 
 -- | Associative. Probably not handy yet
 {-normalize ( Second Disassociate :>>> Disassociate :>>> First Disassociate ) = Disassociate :>>> Disassociate
@@ -613,13 +414,18 @@ normalize (Diag :>>> Arr f) = Arr ( f `o` diagE)
 
 normalize ((Diag :>>> First f) :>>> Swap) = Diag :>>> Second f
 normalize ((Diag :>>> Second f) :>>> Swap) = Diag :>>> First f
+normalize (Swap :>>> First f) = Second f :>>> Swap
+normalize (Swap :>>> Second f) = First f :>>> Swap
+{-
 normalize (First f :>>> Swap) = Swap :>>> Second f
 normalize (Second f :>>> Swap) = Swap :>>> First f
+-}
 
 -- Association of >>>. Not sure if needed or helpful.
 normalize (f :>>> (g :>>> h)) = (f :>>> g) :>>> h -- Added by TOM
 normalize ((f :>>> g) :>>> h) = (f :>>> g) :>>> h -- Added by TOM
 normalize e = e
+
 
 -- | Round 2 is CCA and assoc in other direction
 normalizeA :: AExp -> AExp
@@ -708,7 +514,7 @@ trace f x = let (y, z) = f (x, z) in y
 -- need a traceM?
 
 cross :: (t -> t2) -> (t1 -> t3) -> (t, t1) -> (t2, t3)
-cross = bimap
+cross f g (a,b) = (f a,g b)
 
 -- | Uses whatever Applicative instance for ArrM *** ArrM combining.
 -- Look into Control.Concurrent.Async or
@@ -717,7 +523,7 @@ cross = bimap
 --      pure a = Pair a
 --      Pair fs <*> Pair as = Pair $ (\(f,a) -> f a) $ fs `par` (as `pseq` (fs,as))
 crossM :: Applicative m => (t -> m t2) -> (t1 -> m t3) -> (t, t1) -> m (t2,t3)
-crossM f g =uncurry (liftA2 (,)) . bimap f g
+crossM f g =uncurry (liftA2 (,)) . cross f g
 
 lft :: (t -> a) -> Either t b -> Either a b
 lft f x = case x of
@@ -755,6 +561,7 @@ traceE,lftE :: ExpQ -> ExpQ
 traceE = appE [|trace|]
 lftE = appE [|lft|]
 
+{-
 -- pprNorm and pprNormOpt return the pretty printed normal forms as a
 -- string.
 pprNorm :: ASyn m a b -> Q Exp
@@ -764,6 +571,7 @@ pprNormOpt :: ASyn m a b -> Q Exp
 pprNormOpt = ppr' . normOpt
 ppr' :: Q Exp -> Q Exp
 ppr' e = runQ (fmap toLet e) >>= litE . StringL . simplify . pprint
+-}
 
 -- To Let-Expression
 -- =================
@@ -778,10 +586,34 @@ toLet = G.everywhere (G.mkT aux)
     aux x = x
 
 
-
 simplify :: String -> String
 simplify = unwords . map (unwords . map aux . words) . lines
   where aux (c:x) | not (isAlpha c) = c : aux x
         aux x = let (_, v) = break (=='.') x
                 in if length v > 1 then aux (tail v)
                                    else x
+
+-- | fromAExp converts AExp back to TH Exp structure.
+fromCCA Id = [|id|] -- Categorical constructors should not be around after second stage
+fromCCA Diag = [| diag |]
+fromCCA Fst = [| fst |]
+fromCCA Snd = [| snd |]
+fromCCA Associate = [| arr (\((a,b),c)->(a,(b,c))) |]
+fromCCA Coassociate = [| arr (\(a,(b,c))->((a,b),c)) |]
+fromCCA Swap = [| swap |]
+fromCCA Coidr = [| coidr |]
+fromCCA Coidl = [| coidl |]
+fromCCA Idl = [| idl |]
+fromCCA Idr = [| idr |]
+--fromCCA (Terminate a) = [| terminate $a |]
+
+-- Should not be arround after second rewrite pass:
+fromCCA (Arr f) = [|arr $f |]
+fromCCA (First f) = appE [|Control.Categorical.Bifunctor.first|] (fromCCA f)
+fromCCA (Second f) = appE [|Control.Categorical.Bifunctor.second|] (fromCCA f)
+fromCCA (f :>>> g) = infixE (Just (fromCCA f)) [|(>>>)|] (Just (fromCCA g))
+fromCCA (LoopD i f) = [|loopD $i $f |]
+fromCCA (ArrM i) = [|arrM $i |]
+fromCCA (Delay i) = [|delay $i |]
+fromCCA (f :*** g) = infixE (Just (fromCCA f)) [|(Control.Categorical.Bifunctor.***)|] (Just (fromCCA g)) -- Not in original CCA. 2015-TB
+fromCCA (f :&&& g) = infixE (Just (fromCCA f)) [|(Control.Category.Structural.&&&)|] (Just (fromCCA g)) -- Not in original CCA. 2015-TB

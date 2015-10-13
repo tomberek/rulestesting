@@ -1,5 +1,5 @@
 binary-ghc-args:
-- -O2
+- -O1
 - -threaded
 - -fenable-rewrite-rules
 module-template: ! 'module MODULE_NAME where
@@ -12,10 +12,20 @@ cabal-file: project.cabal
 version: 1
 extra-packages: ! 'Hackage: th-alpha 0.2.0.2
 
-  Git: https://github.com/gelisam/category-syntax 3074f23f8597569fad4b1c4480b8a5efd6d098b2'
+  Git: https://github.com/gelisam/category-syntax 3074f23f8597569fad4b1c4480b8a5efd6d098b2
+
+  Hackage: multiplate 0.0.3
+
+'
 ghc-args:
 - -fenable-rewrite-rules
+- -fno-max-relevant-binds
 excluded-modules:
 - Arrow.hs
+- Auto.hs
+- Control/Arrow/CCA/Optimize.hs
+- Control/Arrow/TH.hs
+- src/Control/Arrow/CCA/AExp.hs
+- src/Control/Arrow/CCA/NoQ.hs
 - src/Control/Category/Monoidal.hs
 - src/Morte/Core.hs

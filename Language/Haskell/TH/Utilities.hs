@@ -1,28 +1,60 @@
+{-# LANGUAGE ImpredicativeTypes #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 -- Miscellaneous utilities on ordinary Haskell syntax used by the arrow
 -- translator.
 
 module Language.Haskell.TH.Utilities(
-    FreeVars(freeVars), DefinedVars(definedVars),
+    FreeVars(freeVars), DefinedVars(definedVars),notIn,
     failureFree, irrPat, paren, parenInfixArg,
-    tuple, tupleP, tuplize,
+    tuple, tupleP, tuplizer,
     times,
-    hsQuote, hsSplice, quoteArr, quoteInit     -- for CCA
-    ,promote,ifM,areExpAEq,expEqual --for id detection
+    hsQuote, hsSplice, quoteArr, quoteInit,     -- for CCA
+    rule,promote,promoteE,ifM,areExpAEq,expEqual,
+    into,RuleE,nothing,nameOccursIn
 ) where
 
-import           Data.Generics                (everywhere, mkT)
+import           Data.Generics
 import           Data.List
+import           Data.Char (isLower)
 import           Language.Haskell.Exts.Syntax
 import qualified Language.Haskell.TH as TH
+import Language.Haskell.TH (Q)
+
+import qualified Language.Haskell.TH.Quote as TH
+import qualified Language.Haskell.TH.Syntax as TH
 import           Language.Haskell.TH.Alpha
+import qualified Control.Lens as L
+import Language.Haskell.Meta
+
+import Control.Monad
+import Control.Category
+import Prelude hiding (id,(.))
+import Control.Arrow((&&&))
+import Language.Haskell.TH.Desugar(nameOccursIn)
+
+into :: Functor f => f a -> f (Maybe a)
+into = fmap Just
+
+nothing :: Monad m => m (Maybe a)
+nothing = return Nothing
 
 
-tuplize :: [Pat] -> Pat
-tuplize [] = PTuple Boxed []
-tuplize [s] =s
-tuplize (s:ss) = PTuple Boxed [s, tuplize ss]
+tuplizer :: a -> ([a]->a) -> [a] -> a
+tuplizer u _ [] = u
+tuplizer _ _ [a] = a
+tuplizer u f (a:as) = f [a,tuplizer u f as]
 
 -- | Like @if@, but where the test can be monadic.
 ifM :: Monad m => m Bool -> m a -> m a -> m a
@@ -37,15 +69,75 @@ promote (TH.TupP pats) = TH.TupE $ map promote pats
 promote (TH.ParensP pat) = TH.ParensE $ promote pat
 promote (TH.ListP pats) = TH.ListE $ map promote pats
 promote (TH.WildP) = TH.TupE []
-promote x = error $ "pattern promotion TODO" ++ show x
+promote x = error $ "pattern promotion not supported for: " ++ show x
 
+promoteE :: Pat -> Exp
+promoteE (PApp _ [pat]) = promoteE pat
+promoteE (PApp _ pats) = Tuple Boxed $ map promoteE pats
+promoteE (PVar n) = Var $ UnQual n
+promoteE (PLit n) = Lit n
+promoteE (PTuple Boxed pats) = Tuple Boxed $ map promoteE pats
+promoteE (PParen pat) = Paren $ promoteE pat
+promoteE (PList pats) = List $ map promoteE pats
+promoteE (PWildCard) = Var $ Special UnitCon
+promoteE x = error $ "pattern promotion not supported for: " ++ show x
+
+pattern Name s = (TH.Name (TH.OccName s) TH.NameS)
+
+rule :: TH.QuasiQuoter
+rule = TH.QuasiQuoter{
+      TH.quoteExp = \input -> case parseExp input of
+          Right b -> TH.dataToExpQ (const Nothing `extQ` updateNameE) b
+          Left c -> error $ "Exp: cannot parse rule pattern: " ++ c ++ " " ++ input
+      , TH.quotePat = \input -> case parseExp input of
+          Right (L.rewrite updateFixity . L.rewrite updateParens -> b) -> TH.dataToPatQ (const Nothing `extQ` updateNameP `extQ` updatePat) b
+          Left c -> error $ "cannot parse rule pattern: " ++ c ++ " " ++ input
+      , TH.quoteDec = error "cannot be declarations."
+      , TH.quoteType = error "cannot be types."
+                  }
+type RuleE = TH.Exp -> Q (Maybe TH.Exp)
+
+updateNameP :: TH.Exp -> Maybe (Q TH.Pat)
+updateNameP (TH.VarE n@(TH.Name (TH.OccName [s]) TH.NameS))
+    | isLower s = Just $ [p| (TH.returnQ -> $(TH.varP n)) |] >>= return . TH.AsP (Name [s,'_'])
+    | otherwise = Nothing
+updateNameP n = Nothing
+
+updateNameE :: TH.Exp -> Maybe TH.ExpQ
+updateNameE (TH.VarE n@(TH.Name (TH.OccName [s]) TH.NameS))
+    | isLower s = Just $ TH.varE n
+    | otherwise = Nothing
+updateNameE n = Nothing
+
+updatePat :: TH.Pat -> Maybe (TH.Q (TH.Pat))
+updatePat (TH.VarP (Name s@[t])) = Just $
+    [p| (promote &&& TH.returnQ -> ( $( [p| (TH.returnQ -> $(TH.varP $ Name $ s ++ "__")) |]
+        >>= return . TH.AsP (Name $ s ++ "_")), $(TH.varP $ Name s)
+                                      )) |]
+        >>= return. TH.AsP (Name $ s ++ "___" )
+updatePat _ = Nothing
+
+-- | Cannot cope with un-handled fixities, ensure all rules have clearly resolved fixity
+updateFixity :: TH.Exp -> Maybe TH.Exp
+updateFixity (TH.UInfixE l o r) = Just $ TH.InfixE (Just l) o (Just r)
+updateFixity n = Nothing
+
+-- | Remove all parens, how does this play with fixities and operators? Superfluous?
+updateParens :: TH.Exp -> Maybe TH.Exp
+updateParens (TH.ParensE e@(TH.LamE _ _)) = Just e
+updateParens (TH.ParensE (TH.UInfixE a b c)) = Just $ TH.InfixE (Just a) b (Just c)
+updateParens (TH.ParensE (TH.AppE a b)) = Just $ TH.AppE a b
+updateParens n = Nothing
+
+notIn :: [Name] -> [Name] -> Bool
+notIn a b = not $ or $ map (flip elem b) a
 
 -- The set of free variables in some construct.
 class FreeVars a where
     freeVars :: a -> [Name]
 
 instance FreeVars a => FreeVars [a] where
-    freeVars = foldl' union [] . map freeVars
+      freeVars = foldl' union [] . map freeVars
 
 instance FreeVars Pat where
     freeVars (PVar n) = [n]
@@ -103,6 +195,7 @@ instance FreeVars Exp where
           freeVars e1 `union` freeVars e2 `union` freeVars e3
     -- freeVars (ListComp e ss) = freeVars e `union` freeVarsStmts ss
     freeVars (ExpTypeSig _ e _) = freeVars e
+    freeVars (LeftArrApp _ p) = freeVars p
     freeVars _ = error "freeVars for Exp not fully implemented"
 
 instance FreeVars QOp where
@@ -110,7 +203,7 @@ instance FreeVars QOp where
     freeVars (QConOp _) = []
 
 instance FreeVars QName where
-    freeVars (UnQual v) = [v]
+    freeVars (UnQual v@(Ident _)) = [v]
     freeVars _ = []
 
 #if __GLASGOW_HASKELL__ <= 708
@@ -152,10 +245,10 @@ instance FreeVars GuardedRhs where
     freeVars (GuardedRhs _ e1 e2) = freeVars e1 `union` freeVars e2
 
 instance FreeVars Stmt where
-    freeVars (Generator _ p e) = freeVars e \\ freeVars p
+    freeVars (Generator _ p e) = freeVars e -- changed
     freeVars (Qualifier e) = freeVars e
     freeVars (LetStmt bs) = freeVars bs
-    freeVars (RecStmt bs) = freeVars bs
+    freeVars (RecStmt bs) = freeVars bs \\ definedVars bs
 
 instance FreeVars Binds where
     freeVars (BDecls bs) = freeVars bs
@@ -192,6 +285,11 @@ instance DefinedVars Binds where
     definedVars (BDecls ds) = definedVars ds
     definedVars (IPBinds _) = error "definedVars IPBinds not defined"
 
+instance DefinedVars Stmt where
+    definedVars (Generator _ p _) = freeVars p -- changed
+    definedVars (Qualifier e) = []
+    definedVars (LetStmt bs) = definedVars bs
+    definedVars (RecStmt bs) = error $ show $ definedVars bs
 -- Is the pattern failure-free?
 -- (This is incomplete at the moment, because patterns made with unique
 -- constructors should be failure-free, but we have no way of detecting them.)

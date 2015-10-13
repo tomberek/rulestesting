@@ -1,3 +1,7 @@
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE ImpredicativeTypes #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -9,34 +13,50 @@
 {-# LANGUAGE AllowAmbiguousTypes    #-}
 module Examples where
 import           Control.Arrow.CCA
-import           Control.Arrow.CCA.Optimize
-import           Control.Arrow.TH
-import           Control.Arrow hiding ((&&&),(***))
+import           Control.Arrow hiding ((&&&),(***),first,second)
+import           qualified Control.Arrow
 import           Control.Concurrent          (threadDelay)
 import Control.Concurrent.Async
 import           Data.Time
 import           Network.HTTP
 import Prelude hiding (id,(.),fst,snd)
 import Control.Category
+import Control.Category.Rules(cat)
 import Control.Category.Associative
 import Control.Category.Structural
-import Control.Category.Monoidal
-import Control.Category.Cartesian
+import Control.Category.Structural.Rules
 import Control.Categorical.Bifunctor
-{-
-line1 :: (M a ~ IO,ArrowCCA a) => a (String, String) ()
-line1 = [arrow| proc (n,g) -> do
-    a <- getURLSum -< n
-    d <- getURLSum -< g
-    b <- arr length -< n
-    c <- arrM (\input -> do
-               print input
-               print ":"
-               read <$> getLine) -< n
-    _ <- arrM print -< a + c + d
-    returnA -< ()
-    |]
+import Language.Haskell.TH.Syntax
+import Control.Arrow.CCA.Rules
+import Control.Arrow.CCA.Free(arrow,category)
+
+
+line1 :: (Category a) => a b b
+line1 = [structural| proc g -> do
+             id -< g|]
+
+line2 :: (HasTerminal a,Category a) => a Int ()
+line2 = [structural| proc g -> id -< () |]
+
+line3 :: (Weaken (,) a,Category a) => a (Int,Int) Int
+line3 = [structural| proc (x,y) -> do
+            line1 -< x |]
 ---}
+
+line4 :: (Weaken (,) a,Contract (,) a,Category a,ArrowCCA a,Symmetric (,) a) => a (Int,Int) Int
+line4 = [catCCA| proc (x,y) -> do
+              z <- arr (*2) -< x+1
+              id -< (z+y)
+              |]
+
+line5 :: Arrow a => a (Maybe c) c
+line5 = [structural| proc (Just a) -> id -< a |]
+
+line6 :: (Category a) => a (Int,Int) (Int,Int)
+line6 = [catCCA| proc (x,y) -> do
+            z <- id -< x
+            id -< (z,y)
+            |]
 
 processURL :: String -> IO String
 processURL a = do
@@ -46,16 +66,17 @@ processURL a = do
     getResponseBody response
 
 getURLSum :: (M a ~ IO,ArrowCCA a) => a String Int
-getURLSum = [arrow| (arrM processURL) >>> (arr length) |]
+getURLSum = [catCCA| (arrM processURL) >>> (arr length) |]
 
-line2 :: (M a ~ IO, ArrowCCA a,Weaken (,) a,Symmetric (,) a,Contract (,) a) => a (String,String) Int
-line2 = [arrow|
+line7 :: (M a ~ IO,ArrowCCA a,Weaken (,) a,Symmetric (,) a,Contract (,) a) => a (String,String) Int
+line7 = [catCCA|
     proc (x,y) -> do
         a <- getURLSum -< y
         b <- getURLSum -< x
         returnA -< a+b
     |]
-    {-
+---}
+        {-
     (e,f) <- cap ()
     (g,h) <- over (c,e)
     (i,j) <- over (f,d)
@@ -72,23 +93,29 @@ line2 = [arrow|
     () <- cup (w,x)
     -}
 
-line3a :: (HasTerminal () a, Symmetric (,) a,HasIdentity () (,) a,Weaken (,) a,Contract (,) a,ArrowCCA a) => a (b,c) (c,())
-line3a = [arrow|
+line8 :: (HasTerminal a, Symmetric (,) a,Contract (,) a,Weaken (,) a) => a (b,c) (c,())
+line8 = [catCCA|
     proc (a,b) -> do
-        (c,d) <- swap -< (a,b)
-        (e,f) <- terminate *** terminate -< ((),())
-        id -< (c,f)
+        f <- terminate () -< a
+        g <- id -< b
+        id -< (g,f)
         |]
+
+temp :: (Associative (,) a,Contract (,) a,Weaken (,) a) => a ((b,c),d) (c,d)
+temp = [structural|
+    proc n -> associate >>> snd -< n
+    |]
+
 {-
-line3a :: (HasTerminal () a,Symmetric (,) a,HasIdentity () (,) a,Weaken (,) a,ArrowCCA a) => a (c,b) ((),())
-line3a = [arrow|
+line9 :: (Associative (,) a,HasTerminal a,Symmetric (,) a,HasIdentity () (,) a,Weaken (,) a,ArrowCCA a,Contract (,) a) => a (c,b) ((),())
+line9 = [catCCA|
     proc (a,b) -> do
         (c,d) <- swap -< (a,b)
-        (e,f) <- terminate *** terminate -< ((),())
+        (e,f) <- terminate () *** terminate () -< ((),())
         (g,h) <- swap -< (c,e)
         (i,j) <- swap -< (f,d)
-        (m,n) <- terminate *** terminate -< ((),())
-        (k,l) <- terminate *** terminate -< ((),())
+        (m,n) <- terminate () *** terminate () -< ((),())
+        (k,l) <- terminate () *** terminate () -< ((),())
         (q,r) <- swap -< (h,k)
         (s,y) <- swap -< (l,i)
         (o,p) <- swap -< (n,g)
@@ -103,7 +130,6 @@ line3a = [arrow|
 ---}
 
 ---}
-{-
 data Bij a b = Bij (a->b) (b->a)
 inverse :: Bij a b -> Bij b a
 inverse (Bij a b) = Bij b a
@@ -118,14 +144,20 @@ tree = Bij (\case
            (\case
                Left x -> (Leaf,x)
                Right (a,(b,x)) -> (Branch a b,x))
-instance Arrow Bij where
-    arr = error "used arr"
-    first (Bij a b) = Bij (\(c,d)->(a c,d)) (\(e,f)->(b e,f))
-instance ArrowLoop Bij where
-    loop = undefined
-instance ArrowCCA Bij where
-    --arr' = error "used arr'"
-    delay = undefined
+instance Bifunctor Either Bij where
+    (Bij a b) *** (Bij f g) = Bij (\case
+                     Left x -> Left $ a x
+                     Right y -> Right $ f y)
+                     (\case
+                         Left x -> Left $ b x
+                         Right y -> Right $ g y)
+instance PFunctor Either Bij
+instance QFunctor Either Bij
+instance Symmetric Either Bij where
+    swap = Bij swap swap
+instance Associative Either Bij where
+    associate = Bij associate coassociate
+    coassociate = Bij coassociate associate
 type T = Tree
 type T0 = ()
 type T1 = (T,T0)
@@ -136,19 +168,44 @@ type T5 = (T,T4)
 type T6 = (T,T5)
 type T7 = (T,T6)
 type T8 = (T,T7)
----}
-{-
-step1 :: ArrowCCA a => a T1 T3
-step1 = [arrow|
-    proc (t1,()) -> do
-    Right (t0,t2) <- Lift tree -< t1
-    Right (t1',t3) <- Lift tree -< t2
-    returnA -< (t3,t1')
+
+
+iso2 :: Bij T1 T7
+iso2 = [structural|
+    proc (ta,tb) -> do
+    (t0,t2') <- tree -< (ta,tb)
+    (t1,t3') <- tree -< t2'
+    (t2,t4') <- tree -< t3'
+    (t3,t5) <- tree -< t4'
+    (t4,t6') <- tree -< t5
+    (t5',t7') <- tree -< t6'
+
+
+    t4'' <- inverse tree -< (t3,t5')
+    t3'' <- inverse tree -< (t2,t4'')
+    t2'' <- inverse tree -< (t1,t3'')
+    t1'' <- inverse tree -< (t0,t2'')
+
+    (t6''', t8) <- tree -< t7'
+    (t5''', t7f) <- tree -< t6'''
+    (t4''', t6f) <- tree -< t5'''
+    (t3''', t5f) <- tree -< t4'''
+
+
+    t2'''' <- inverse tree -< (t1'',t3''')
+    t3'''' <- inverse tree -< (t2'''',t4)
+    t4'''' <- inverse tree -< (t3'''',t5f)
+    t5'''' <- inverse tree -< (t4'''',t6f)
+    t6'''' <- inverse tree -< (t5'''',t7f)
+    t7'''' <- inverse tree -< (t6'''',t8)
+    returnA -< t7''''
     |]
-iso :: Bij Tree Tree
-iso = [arrow|
-    proc t1 -> do
-    (t0, t2) <- tree -< t1
+{-
+
+iso :: Bij T1 T7
+iso = [structural|
+    proc (ta1,ta2) -> do
+    (t0, t2) <- tree -< (ta1,ta2)
     (t1', t3) <- tree -< t2
     (t2', t4) <- tree -< t3
     (t3', t5) <- tree -< t4
@@ -167,10 +224,10 @@ iso = [arrow|
     (t4''', t6'') <- tree -< t5''
     (t3''', t5''') <- tree -< t4'''
 
-    -- still in scope: t1'', t3''', t4''',t5''',t6'',t7',t8
+    -- still in scope: t1'', t3''', t4', t5''',t6'',t7',t8
 
     t2''' <- inverse tree -< (t1'', t3''')
-    t3'''' <- inverse tree -< (t2''', t4''')
+    t3'''' <- inverse tree -< (t2''', t4')
     t4'''' <- inverse tree -< (t3'''', t5''')
     t5'''' <- inverse tree -< (t4'''', t6'')
     t6''' <- inverse tree -< (t5'''', t7')
@@ -178,7 +235,6 @@ iso = [arrow|
 
     returnA -< t7''
     |]
----}
 data KnotSection a b where
    Line  :: KnotSection a a
    Over  :: KnotSection (a,b) (b,a)
@@ -211,7 +267,7 @@ example1 = [arrow|
         returnA -< a
     |]
 -}
-
+---}
 
 {-
 example4 :: ArrowCCA a => a Int Int
@@ -229,38 +285,45 @@ example4b = [arrow|
         d <- arr (uncurry (+)) -< (n,n)
         arr (uncurry (-)) -< (n,d)
             |]
+
+
 example2 :: (Symmetric (,) a,Contract (,) a,ArrowCCA a) => a Int Int
-example2 = [arrow|
-    proc n -> do
-        b <-  arr (+1) -< n+2*3
-        e <-  arr (+2) -< n
-        c <-  arr (+3) -< b
-        d <-  arr (uncurry (+)) -< (c,e)
-        arr (uncurry (-)) -< (n,d)
+example2 = [catCCA|
+    proc x -> do
+            y <- f -< x+1
+            g -< 2*y
+            let z = x+y
+            t <- h -< x*z
+            returnA -< t+z
             |]
 ---}
+{-
+should be
+arr (\ x -> (x+1, x)) >>>
+        first f >>>
+        arr (\ (y, x) -> (2*y, (x, y))) >>>
+        first g >>>
+        arr (\ (_, (x, y)) -> let z = x+y in (x*z, z)) >>>
+        first h >>>
+        arr (\ (t, z) -> t+z)
 ---}
-
-{- no implemented yet
-example1 :: ArrowInit a => a Int Int
-example1 = [arrow|
+example1 :: ArrowCCA a => a Int Int
+example1 = [catCCA|
     proc n -> do
         a  <- arr (\x -> x) -< (n::Int)
         rec
             e <- arr (+1) -< a + (1::Int)
-        returnA -< a
+            b <- delay 0 -< e
+        returnA -< b
     |]
 
-
-{-
 i :: ArrowCCA a => a Int Int
-i = [arrow|
+i = [catCCA|
     proc n -> do
         x <- arr id -< n
         y <- arr (+1) -< x
         let z = x+y
         returnA -< z
         |]
-
 ---}
 ---}
