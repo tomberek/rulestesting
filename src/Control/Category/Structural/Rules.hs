@@ -26,9 +26,9 @@ import Control.Category.Associative.Rules
 import Control.Arrow.CCA.Free(category)
 
 structural :: QuasiQuoter
-structural = category $ [ bifunctor_ruleset ++ assoc_ruleset  ++ struct_ruleset ++ category_ruleset']
-                          -- category_ruleset' ++ bifunctor_ruleset  ++ assoc_ruleset ++ struct_ruleset,
-                           --   category_ruleset' ] -- ++ bifunctor_ruleset ++ assoc_ruleset ++ struct_ruleset]
+structural = category $ [ bifunctor_ruleset ++ assoc_ruleset  ++ struct_ruleset ++ category_ruleset',
+                           category_ruleset' ++ bifunctor_ruleset  ++ assoc_ruleset ++ struct_ruleset,
+                              category_ruleset ++ bifunctor_ruleset ++ assoc_ruleset ++ struct_ruleset]
 
 struct_ruleset :: [RuleE]
 struct_ruleset =[struct_rules,struct_rules_bi,struct_weak,struct_rules_trav,struct_rules_rare]

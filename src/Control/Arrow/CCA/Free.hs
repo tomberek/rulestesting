@@ -100,7 +100,7 @@ category rules = QuasiQuoter {
           res <- buildA result
           res2 <- foldM transformExp res rules
           --reportWarning $ pprint res2
-          return res2
+          arrFixer res2
       E.ParseFailed l err -> error $ "arrow QuasiQuoter: " ++ show l ++ " " ++ show err
   , quotePat = error "cannot be patterns."
   , quoteDec = error "category: cannot by dec"
@@ -311,7 +311,7 @@ toExp' = CCAPlate $ \case
     FreeCCAOp (ArrM' a _) -> Constant [| arrM $a |]
     FreeCCAOp (Delay' a _) -> Constant [| delay $a |]
     FreeCCATerminateOp (Terminate' a _) -> Constant [| terminate $a |]
-    _ -> error "unable to convert to ExpQ"
+    a -> error $ show a
 
 instance Show (FreeCCA m i p k a b) where
     show (FreeCCABaseOp _) = "SomeArrow"
@@ -380,13 +380,13 @@ instance HasIdentity i p (FreeCCA m i p k)
 instance Monoidal i p (FreeCCA m i p k)
 instance Cartesian i p (FreeCCA m i p k)
 
-instance Arrow k => Arrow (FreeCCA m i (,) k) where
-    arr _ = error "only defined for arr'"
+instance Arrow (FreeCCA IO i (,) (Kleisli IO)) where
+    arr a = FreeCCAArrowOp $ Arr $ Kleisli (return.a)
     first a = FreeCCAPfunctorOp (First a)
-instance ArrowLoop k => ArrowLoop (FreeCCA m i (,) k) where
+instance ArrowLoop (FreeCCA IO i (,) (Kleisli IO)) where
     loop x = error "only defined for loopD"
-instance (m ~ M k,ArrowCCA k,Arrow k) => ArrowCCA (FreeCCA m i (,) k) where
-    type M (FreeCCA m i (,) k) = m
+instance (m ~ M (Kleisli IO)) => ArrowCCA (FreeCCA IO i (,) (Kleisli IO)) where
+    type M (FreeCCA IO i (,) (Kleisli IO)) = IO
     arr' x y = FreeCCAArrowOp $ Arr' x (arr y)
     arrM' x y = FreeCCAOp $ ArrM' x (arr y)
     arrM x = error "only defined for arrM'"

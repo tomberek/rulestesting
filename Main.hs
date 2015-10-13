@@ -45,12 +45,22 @@ t = $(toExpCCA (line3 :: FreeCCA Identity () (,) (->) (Int,Int) Int))
 t2 :: (IO ~ M a,ArrowCCA a,Bifunctor (,) a) => a (String,String) Int
 t2 = $(toExpCCA (line7 :: FreeCCA IO () (,) (Kleisli IO) (String,String) Int))
 
+--t3 :: ExpQ
+t3 :: (ArrowCCA a,Contract (,) a) => a Int Int
+t3 = $(toExpCCA (example2 :: (IO ~ M (Kleisli IO) ) => FreeCCA IO () (,) (Kleisli IO) Int Int))
+
 main :: IO ()
 main = do
     printExp line3
     printExp t
     printExp (line7 :: FreeCCA IO () (,) (Kleisli IO) (String,String) Int)
     printExp (t2 :: FreeCCA IO () (,) (Kleisli IO) (String,String) Int)
+
+    let g = (example2 :: FreeCCA IO () (,) (Kleisli IO) Int Int)
+    printExp (example2 :: FreeCCA IO () (,) (Kleisli IO) Int Int)
+    printExp (t3 :: FreeCCA IO () (,) (Kleisli IO) Int Int)
+    print "hi"
+    
     --print "Autos running in parallel"
     --let a = $(norm line2) :: AutoXIO (String,String) Int
     --    b = runAutoIO_ a

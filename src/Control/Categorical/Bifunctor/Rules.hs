@@ -75,7 +75,7 @@ bifunctor_id_f _ = nothing
 
 bifunctor_f_id :: RuleE
 bifunctor_f_id [rule| bimap id f |] = into [| first $f |]
-bifunctor_f_id [rule| id *** f |]   = into [| first $f |]
+bifunctor_f_id [rule| f *** id |]   = into [| first $f |]
 bifunctor_f_id [rule| (fst >>> f) &&& snd |] = into [| first $f |]
 bifunctor_f_id _ = nothing
 

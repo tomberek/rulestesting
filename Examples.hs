@@ -49,7 +49,7 @@ line4 = [catCCA| proc (x,y) -> do
               id -< (z+y)
               |]
 
-line5 :: Arrow a => a (Maybe c) c
+line5 :: ArrowCCA a => a (Maybe c) c
 line5 = [structural| proc (Just a) -> id -< a |]
 
 line6 :: (Category a) => a (Int,Int) (Int,Int)
@@ -200,41 +200,6 @@ iso2 = [structural|
     t7'''' <- inverse tree -< (t6'''',t8)
     returnA -< t7''''
     |]
-{-
-
-iso :: Bij T1 T7
-iso = [structural|
-    proc (ta1,ta2) -> do
-    (t0, t2) <- tree -< (ta1,ta2)
-    (t1', t3) <- tree -< t2
-    (t2', t4) <- tree -< t3
-    (t3', t5) <- tree -< t4
-    (t4', t6) <- tree -< t5
-    (t5', t7) <- tree -< t6
-
-    t4'' <- inverse tree -< (t3', t5')
-    t3'' <- inverse tree -< (t2', t4'')
-    t2'' <- inverse tree -< (t1', t3'')
-    t1'' <- inverse tree -< (t0, t2'')
-
-    -- still in scope: t1'',  t4',  t7
-
-    (t6', t8) <- tree -< t7
-    (t5'', t7') <- tree -< t6'
-    (t4''', t6'') <- tree -< t5''
-    (t3''', t5''') <- tree -< t4'''
-
-    -- still in scope: t1'', t3''', t4', t5''',t6'',t7',t8
-
-    t2''' <- inverse tree -< (t1'', t3''')
-    t3'''' <- inverse tree -< (t2''', t4')
-    t4'''' <- inverse tree -< (t3'''', t5''')
-    t5'''' <- inverse tree -< (t4'''', t6'')
-    t6''' <- inverse tree -< (t5'''', t7')
-    t7'' <- inverse tree -< (t6''', t8)
-
-    returnA -< t7''
-    |]
 data KnotSection a b where
    Line  :: KnotSection a a
    Over  :: KnotSection (a,b) (b,a)
@@ -257,19 +222,14 @@ instance ArrowLoop KnotSection where
     loop = error "not defined"
 instance ArrowCCA KnotSection where
     delay = error "not defined"
-{- no implemented yet
-example1 :: ArrowCCA a => a Int Int
-example1 = [arrow|
+example1' :: Arrow a => a Int Int
+example1' = [arrow|
     proc n -> do
         a  <- arr (\x -> x) -< (n::Int)
         rec
             e <- arr (+1) -< a + (1::Int)
         returnA -< a
     |]
--}
----}
-
-{-
 example4 :: ArrowCCA a => a Int Int
 example4 = [arrow|
      proc n -> do
@@ -288,7 +248,7 @@ example4b = [arrow|
 
 
 example2 :: (Symmetric (,) a,Contract (,) a,ArrowCCA a) => a Int Int
-example2 = [catCCA|
+example2 = _ $ [structural|
     proc x -> do
             y <- f -< x+1
             g -< 2*y
@@ -296,6 +256,9 @@ example2 = [catCCA|
             t <- h -< x*z
             returnA -< t+z
             |]
+    where f = arr' [| ((*) 999) |] ((*) 999)
+          h = arr' [| ((*) 888) |] ((*) 888)
+
 ---}
 {-
 should be
