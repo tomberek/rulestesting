@@ -27,5 +27,7 @@ excluded-modules:
 - Control/Arrow/TH.hs
 - src/Control/Arrow/CCA/AExp.hs
 - src/Control/Arrow/CCA/NoQ.hs
+- src/Control/CCA/Normalize.hs
 - src/Control/Category/Monoidal.hs
+- src/Data/Compos.hs
 - src/Morte/Core.hs
