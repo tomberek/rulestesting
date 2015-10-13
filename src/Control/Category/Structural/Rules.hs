@@ -26,9 +26,9 @@ import Control.Category.Associative.Rules
 import Control.Arrow.CCA.Free(category)
 
 structural :: QuasiQuoter
-structural = category $ [category_ruleset ++ bifunctor_ruleset ++ assoc_ruleset ++ struct_ruleset,
-                          category_ruleset' ++ bifunctor_ruleset ++ assoc_ruleset ++ struct_ruleset,
-                          category_ruleset ++ bifunctor_ruleset ++ assoc_ruleset ++ struct_ruleset]
+structural = category $ [ bifunctor_ruleset ++ assoc_ruleset  ++ struct_ruleset ++ category_ruleset']
+                          -- category_ruleset' ++ bifunctor_ruleset  ++ assoc_ruleset ++ struct_ruleset,
+                           --   category_ruleset' ] -- ++ bifunctor_ruleset ++ assoc_ruleset ++ struct_ruleset]
 
 struct_ruleset :: [RuleE]
 struct_ruleset =[struct_rules,struct_rules_bi,struct_weak,struct_rules_trav,struct_rules_rare]
@@ -43,11 +43,11 @@ struct_rules [rule| (\(x,y) -> z) |] | x_ == z_ = into [| fst |]
                                      | case x_ of
                                          VarE a -> not $ nameOccursIn a z_
                                          _ -> False
-                                         = reportWarning "weakened!" >> into [| (snd >>> (\ $y -> $z )) |]
+                                         = into [| (snd >>> (\ $y -> $z )) |]
                                      | case y_ of
                                          VarE a -> not $ nameOccursIn a z_
                                          _ -> False
-                                         = reportWarning "weakened!" >> into [| (fst >>> (\ $x -> $z )) |]
+                                         = into [| (fst >>> (\ $x -> $z )) |]
                                      | otherwise = nothing
 struct_rules _ = nothing
 
@@ -67,7 +67,7 @@ struct_weak _ = return Nothing
 
 struct_rules_bi :: RuleE
 struct_rules_bi [rule| (fst >>> f) &&& (snd >>> g) |] = into [| $f *** $g |]
-struct_rules_bi [rule| (snd >>> f) &&& (fst >>> g) |] = into [| $g *** $f |]
+struct_rules_bi [rule| (snd >>> f) &&& (fst >>> g) |] = into [| swap >>> ($f *** $g) |]
 struct_rules_bi [rule| fst &&& (snd >>> g) |] = into [| id *** $g |]
 struct_rules_bi [rule| (fst >>> f) &&& snd |] = into [| $f *** id |]
 struct_rules_bi [rule| snd &&& (fst >>> g) |] = into [| swap >>> (id *** $g) |]
@@ -92,6 +92,7 @@ struct_rules_bi [rule| diag >>> first f >>> swap |] = into [| diag >>> second $f
 struct_rules_bi [rule| diag >>> second f >>> swap |] = into [| diag >>> first $f |]
 struct_rules_bi [rule| swap >>> first f |] = into [| second $f >>> swap |] -- bubble all swaps to the right
 struct_rules_bi [rule| swap >>> second f |] = into [| first $f >>> swap |] -- bubble all swaps to the right
+struct_rules_bi [rule| swap >>> (f *** g) |] = into [| ($g *** $f) >>> swap |] -- bubble all swaps to the right
 struct_rules_bi [rule| first f >>> fst |] = into [| fst >>> $f |] -- bubble all fst to the left
 struct_rules_bi [rule| second f >>> snd |] = into [| snd >>> $f |] -- bubble all snd to the left
 struct_rules_bi [rule| first f >>> snd |] = into [| snd |]

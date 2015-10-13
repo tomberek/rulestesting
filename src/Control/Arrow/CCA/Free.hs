@@ -28,7 +28,6 @@ Portability :  TemplateHaskell,QuasiQuotes,ViewPatterns
 module Control.Arrow.CCA.Free (
     arrow,into,buildA,
     cleanNames,parseMode,arrFixer,fixity,
-    --AExp(..),ASyn(..),fromAExp,findM,eqM,fromASyn,printCCA,norm
     simplify,category,C.Dict(..),
     transformExp,toExp',FreeCCA(..),catplate,printExp
     ) where
@@ -156,6 +155,9 @@ buildA (E.Proc _ pat expr) = buildB pat expr
 buildA expr = return $ toExp expr
 
 buildB :: E.Pat -> E.Exp -> ExpQ
+buildB (E.PTuple E.Boxed [a,b]) (E.Do exps) = snd $ head final
+    where rest = buildC (init exps) [(a,[|fst|]),(b,[|snd|])]
+          final = buildC [last exps] rest
 buildB pat (E.Do exps) = snd $ head final
     where rest = buildC (init exps) [(pat,[|id|])]
           final = buildC [last exps] rest
@@ -170,14 +172,18 @@ buildC stmts exps = if null newExps then exps else buildC rest (newExps ++ exps)
           sources = zip goals $ sourceGetter <$> goals
           sourceGetter :: E.Stmt -> [(E.Pat,ExpQ)]
           sourceGetter (freeVars -> s) = Data.List.filter (any (flip elem s) . freeVars . fst) exps
-          newExps = map (uncurry buildD') sources
+          newExps = concatMap (uncurry buildD) sources
 
 (*:*) :: ExpQ -> ExpQ -> ExpQ
 expr1 *:* expr2 = infixE (Just expr1) (varE $ mkName "***") (Just expr2)
 (&:&) :: ExpQ -> ExpQ -> ExpQ
 expr1 &:& expr2 = infixE (Just expr1) (varE $ mkName "&&&") (Just expr2)
 
-
+buildD :: E.Stmt -> [(E.Pat,ExpQ)] -> [(E.Pat,ExpQ)]
+buildD stmt s = case outp of
+        E.PTuple E.Boxed [a,b] -> [(a,[| (($outexp) >>> fst) |]),(b,[| (($outexp) >>> snd) |])]
+        _ -> [(outp,outexp)]
+    where (outp,outexp) = buildD' stmt s
 buildD' :: E.Stmt -> [(E.Pat,ExpQ)] -> (E.Pat,ExpQ)
 buildD' stmt@(E.RecStmt _) s = (origp,do
     a <- [| $fixedTuple >>> loop ($fixedSetup >>> $joinedArrows >>> $fixedTuple2) |]

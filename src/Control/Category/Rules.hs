@@ -23,9 +23,12 @@ import Control.Arrow
 import Control.Category
 import Prelude hiding (id,(.),fst,snd)
 --import Control.Arrow.TH (ASyn)
+import Control.Arrow.CCA.Free
 
 import Debug.Trace
 import Control.Category.Free
+
+cat = category [category_ruleset]
 
 category_ruleset :: [RuleE]
 category_ruleset = [category_id,category_id_comp,category_rightAssoc]

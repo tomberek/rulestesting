@@ -17,6 +17,7 @@ import Language.Haskell.TH.Lib
 
 pattern P a = PVar a
 pattern E a = Var a
+pattern PP a rest = PTuple Boxed [a,rest]
 pattern EP a rest = Tuple Boxed [a,rest]
 
 fixTuple :: [ExpQ] -> Pat -> Exp -> ExpQ

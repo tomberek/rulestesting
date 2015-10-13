@@ -25,11 +25,12 @@ import Data.Functor.Identity
 import Data.Generics.Multiplate
 import Control.Arrow.CCA
 import Control.Monad
+import Control.Applicative
 
 toExpCCA :: FreeCCA m i p k a b -> ExpQ
 toExpCCA a = do
     a' <- foldFor catplate toExp' a
-    reportError $ show a
+    --reportError $ show a
     foldM transformExp a' all_cca
 
 catCCA :: QuasiQuoter
@@ -44,7 +45,7 @@ all_cca = [category_ruleset ++ bifunctor_ruleset ++ assoc_ruleset ++ struct_rule
 
 cca_ruleset,cca_ruleset' :: [RuleE]
 cca_ruleset' = [cca_rulesetT,cca_rulesetT2,cca_rulesetT3,cca_rulesetTerm]
-cca_ruleset = [cca_rulesetT,cca_rulesetT2,cca_rulesetT2a,cca_rulesetT3,cca_rulesetT4,cca_rulesetTerm]
+cca_ruleset = [cca_rulesetT,cca_rulesetT2,cca_rulesetT2a,cca_rulesetT3,cca_rulesetT4,cca_rulesetTerm,cca_rulesetArrM]
 
 
 cca_ruleset_arr :: RuleE
@@ -53,24 +54,6 @@ cca_ruleset_arr [rule| arrM f |] = into [| arrM' (returnQ $(lift f_)) $f |]
 cca_ruleset_arr [rule| delay f |] = into [| delay' (returnQ $(lift f_)) $f |]
 cca_ruleset_arr [rule| terminate f |] = into [| terminate' (returnQ $(lift f_)) $f |]
 cca_ruleset_arr _ = nothing
-{-
-arrFixer :: Exp -> ExpQ
-arrFixer = rewriteM arg
-    where
-        arg (AppE (VarE (Name (OccName "arr") _)) e) =
-            fmap Just [| arr' (returnQ $(lift e)) $(returnQ e) |]
-        arg (AppE (VarE (Name (OccName "arrM") _)) e) =
-            fmap Just [| arrM' (returnQ $(lift e)) $(returnQ e) |]
-        arg (AppE (VarE (Name (OccName "delay") _)) e) =
-            fmap Just [| delay' (returnQ $(lift e)) $(returnQ e) |]
-        arg (VarE (Name (OccName "returnA") _)) =
-            fmap Just [| arr' (returnQ $([| Q.id |] >>= lift)) Q.id |]
-        arg (AppE (ConE (Name (OccName "Lift") _)) e) =   -- Huh?
-            fmap Just $ returnQ e
-        arg (AppE (VarE (Name (OccName "terminate") _)) e) =
-            fmap Just [| terminate' (returnQ $(lift e)) $(returnQ e) |]
-        arg _ = return Nothing
--}
 
 cca_rulesetT :: RuleE
 cca_rulesetT [rule| arr f >>> arr g |] = into [|  arr ( $g . $f) |]
@@ -121,6 +104,13 @@ cca_rulesetT4 [rule| loopD i f >>> g |] | isArrLike g_ = into [| loopD $i ( ($g 
                                         | otherwise = nothing
 cca_rulesetT4 a = nothing
 
+cca_rulesetArrM :: RuleE
+cca_rulesetArrM [rule| arr f >>> arrM g |] = into [| arrM ($g . $f) |]
+cca_rulesetArrM [rule| arrM f >>> arr g |] = into [| arrM (liftM $g . $f) |]
+cca_rulesetArrM [rule| first (arrM f) |] = into [| arrM ($f `crossM` return) |]
+cca_rulesetArrM [rule| second (arrM f) |] = into [| arrM (return `crossM` $f) |]
+cca_rulesetArrM _ = nothing
+
 cca_rulesetTerm :: RuleE
 cca_rulesetTerm [rule| f >>> terminate g |] = into [| terminate $g |] -- unsound? removes effects?
 cca_rulesetTerm [rule| f >>> (terminate h *** terminate g) |] = into [| terminate $h *** terminate $g |] -- unsound? removes effects?
@@ -134,3 +124,5 @@ trace :: ((t1, t2) -> (t, t2)) -> t1 -> t -- pure looping
 trace f x = let (y, z) = f (x, z) in y
 cross :: (t -> t2) -> (t1 -> t3) -> (t, t1) -> (t2, t3)
 cross = (***)
+crossM :: Applicative m => (t -> m t2) -> (t1 -> m t3) -> (t, t1) -> m (t2,t3)
+crossM f g =uncurry (liftA2 (,)) . cross f g

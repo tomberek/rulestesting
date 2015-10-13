@@ -22,7 +22,11 @@ import Control.Categorical.Bifunctor.Free
 import Control.Categorical.Bifunctor
 
 assoc_ruleset :: [RuleE]
-assoc_ruleset = [assoc_ruleset_arr3,assoc_disassoc,assoc_ruleset_tuplize,assoc_ruleset_deArr]
+assoc_ruleset = [assoc_ruleset_arr3,assoc_disassoc,assoc_ruleset_tuplize,assoc_ruleset_deArr,assoc_ruleset_simp]
+
+assoc_ruleset_simp [rule| ((second f) >>> h) &&& (snd >>> g) |] = into [| second ($f &&& $g) >>> coassociate >>> first $h |]
+assoc_ruleset_simp [rule| (second f) &&& (snd >>> g) |] = into [| second ($f &&& $g) >>> coassociate |]
+assoc_ruleset_simp _ = nothing
 
 assoc_ruleset_arr3 :: RuleE
 assoc_ruleset_arr3 [rule| arr (\(a,(b,c)) -> ((x,y),z)) |]
@@ -30,6 +34,9 @@ assoc_ruleset_arr3 [rule| arr (\(a,(b,c)) -> ((x,y),z)) |]
     | a_ == y_ && b_ == x_ && c_ == z_ = into [| coassociate >>> first swap |]
     | a_ == x_ && b_ == z_ && c_ == y_ = into [| second swap >>> coassociate |]
     | otherwise = nothing
+assoc_ruleset_arr3 [rule| (\(a,(b,c)) -> (x,(y,z))) |] | b_ == x_ && a_ == y_ && c_ == z_ = into [| coassociate >>> first swap >>> associate |]
+                                                       | c_ == x_ && a_ == y_ && b_ == z_ = into [| second swap >>> coassociate >>> first swap >>> associate |]
+                                                       | otherwise = nothing
 assoc_ruleset_arr3 _ = nothing
 
 

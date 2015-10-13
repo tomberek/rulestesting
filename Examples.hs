@@ -1,3 +1,4 @@
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE ImpredicativeTypes #-}
 {-# LANGUAGE RankNTypes #-}
@@ -13,18 +14,22 @@
 module Examples where
 import           Control.Arrow.CCA
 import           Control.Arrow hiding ((&&&),(***),first,second)
+import           qualified Control.Arrow
 import           Control.Concurrent          (threadDelay)
 import Control.Concurrent.Async
 import           Data.Time
 import           Network.HTTP
 import Prelude hiding (id,(.),fst,snd)
 import Control.Category
+import Control.Category.Rules(cat)
 import Control.Category.Associative
 import Control.Category.Structural
 import Control.Category.Structural.Rules
 import Control.Categorical.Bifunctor
 import Language.Haskell.TH.Syntax
 import Control.Arrow.CCA.Rules
+import Control.Arrow.CCA.Free(arrow,category)
+
 
 line1 :: (Category a) => a b b
 line1 = [structural| proc g -> do
@@ -125,7 +130,6 @@ line9 = [catCCA|
 ---}
 
 ---}
-{-
 data Bij a b = Bij (a->b) (b->a)
 inverse :: Bij a b -> Bij b a
 inverse (Bij a b) = Bij b a
@@ -140,14 +144,20 @@ tree = Bij (\case
            (\case
                Left x -> (Leaf,x)
                Right (a,(b,x)) -> (Branch a b,x))
-instance Arrow Bij where
-    arr = error "used arr"
-    first (Bij a b) = Bij (\(c,d)->(a c,d)) (\(e,f)->(b e,f))
-instance ArrowLoop Bij where
-    loop = undefined
-instance ArrowCCA Bij where
-    --arr' = error "used arr'"
-    delay = undefined
+instance Bifunctor Either Bij where
+    (Bij a b) *** (Bij f g) = Bij (\case
+                     Left x -> Left $ a x
+                     Right y -> Right $ f y)
+                     (\case
+                         Left x -> Left $ b x
+                         Right y -> Right $ g y)
+instance PFunctor Either Bij
+instance QFunctor Either Bij
+instance Symmetric Either Bij where
+    swap = Bij swap swap
+instance Associative Either Bij where
+    associate = Bij associate coassociate
+    coassociate = Bij coassociate associate
 type T = Tree
 type T0 = ()
 type T1 = (T,T0)
@@ -158,19 +168,44 @@ type T5 = (T,T4)
 type T6 = (T,T5)
 type T7 = (T,T6)
 type T8 = (T,T7)
----}
-{-
-step1 :: ArrowCCA a => a T1 T3
-step1 = [arrow|
-    proc (t1,()) -> do
-    Right (t0,t2) <- Lift tree -< t1
-    Right (t1',t3) <- Lift tree -< t2
-    returnA -< (t3,t1')
+
+
+iso2 :: Bij T1 T7
+iso2 = [structural|
+    proc (ta,tb) -> do
+    (t0,t2') <- tree -< (ta,tb)
+    (t1,t3') <- tree -< t2'
+    (t2,t4') <- tree -< t3'
+    (t3,t5) <- tree -< t4'
+    (t4,t6') <- tree -< t5
+    (t5',t7') <- tree -< t6'
+
+
+    t4'' <- inverse tree -< (t3,t5')
+    t3'' <- inverse tree -< (t2,t4'')
+    t2'' <- inverse tree -< (t1,t3'')
+    t1'' <- inverse tree -< (t0,t2'')
+
+    (t6''', t8) <- tree -< t7'
+    (t5''', t7f) <- tree -< t6'''
+    (t4''', t6f) <- tree -< t5'''
+    (t3''', t5f) <- tree -< t4'''
+
+
+    t2'''' <- inverse tree -< (t1'',t3''')
+    t3'''' <- inverse tree -< (t2'''',t4)
+    t4'''' <- inverse tree -< (t3'''',t5f)
+    t5'''' <- inverse tree -< (t4'''',t6f)
+    t6'''' <- inverse tree -< (t5'''',t7f)
+    t7'''' <- inverse tree -< (t6'''',t8)
+    returnA -< t7''''
     |]
-iso :: Bij Tree Tree
-iso = [arrow|
-    proc t1 -> do
-    (t0, t2) <- tree -< t1
+{-
+
+iso :: Bij T1 T7
+iso = [structural|
+    proc (ta1,ta2) -> do
+    (t0, t2) <- tree -< (ta1,ta2)
     (t1', t3) <- tree -< t2
     (t2', t4) <- tree -< t3
     (t3', t5) <- tree -< t4
@@ -189,10 +224,10 @@ iso = [arrow|
     (t4''', t6'') <- tree -< t5''
     (t3''', t5''') <- tree -< t4'''
 
-    -- still in scope: t1'', t3''', t4''',t5''',t6'',t7',t8
+    -- still in scope: t1'', t3''', t4', t5''',t6'',t7',t8
 
     t2''' <- inverse tree -< (t1'', t3''')
-    t3'''' <- inverse tree -< (t2''', t4''')
+    t3'''' <- inverse tree -< (t2''', t4')
     t4'''' <- inverse tree -< (t3'''', t5''')
     t5'''' <- inverse tree -< (t4'''', t6'')
     t6''' <- inverse tree -< (t5'''', t7')
