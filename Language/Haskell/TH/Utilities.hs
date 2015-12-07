@@ -21,7 +21,7 @@ module Language.Haskell.TH.Utilities(
     tuple, tupleP, tuplizer,
     times,
     hsQuote, hsSplice, quoteArr, quoteInit,     -- for CCA
-    rule,promote,promoteE,ifM,areExpAEq,expEqual,
+    rule,promote,promoteE,ifM,
     into,RuleE,nothing,nameOccursIn
 ) where
 
@@ -34,7 +34,6 @@ import Language.Haskell.TH (Q)
 
 import qualified Language.Haskell.TH.Quote as TH
 import qualified Language.Haskell.TH.Syntax as TH
-import           Language.Haskell.TH.Alpha
 import qualified Control.Lens as L
 import Language.Haskell.Meta
 

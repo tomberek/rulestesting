@@ -10,11 +10,10 @@ environment: ghc-7.8-stable-14.09
 auto-hidden: []
 cabal-file: project.cabal
 version: 1
-extra-packages: ! '
-
-  Git: https://github.com/gelisam/category-syntax 3074f23f8597569fad4b1c4480b8a5efd6d098b2
+extra-packages: ! 'Git: https://github.com/gelisam/category-syntax 3074f23f8597569fad4b1c4480b8a5efd6d098b2
 
   Hackage: multiplate 0.0.3
+
 
 '
 ghc-args:
